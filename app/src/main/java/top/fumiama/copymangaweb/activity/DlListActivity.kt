@@ -5,11 +5,16 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.View
+import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.TextView
 import android.widget.Toast
 import top.fumiama.copymangaweb.R
 import top.fumiama.copymangaweb.databinding.ActivityDlistBinding
 import top.fumiama.copymangaweb.tool.InsetsTools
+import top.fumiama.copymangaweb.tool.NightTint
+import top.fumiama.copymangaweb.tool.NovelStore
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.regex.Pattern
@@ -26,7 +31,35 @@ class DlListActivity : Activity() {
         setContentView(mBinding.root)
         InsetsTools.applySafeContentInsets(this, mBinding.root)
         mBinding.myt.ttitle.text = intent.getStringExtra("title")
+        applyNight()
         loadDirectory(currentDir)
+    }
+
+    private val night get() = NightTint.on(this)
+    private val barOrigin by lazy { NightTint.captureBars(this) }
+
+    override fun onResume() {
+        super.onResume()
+        NightTint.applyBars(this, barOrigin)
+    }
+
+    private fun applyNight() {
+        if (!night) return
+        mBinding.root.setBackgroundColor(NightTint.BG)
+        mBinding.mylv.setBackgroundColor(NightTint.BG)
+        mBinding.myt.titlecard.setCardBackgroundColor(NightTint.SURFACE)
+        mBinding.myt.ttitle.setTextColor(NightTint.FG)
+        NightTint.applyBars(this, barOrigin)
+    }
+
+    /** 系统列表项在暗色下文字仍是深色，这里换成自绘的浅色文字项。 */
+    private inner class NightListAdapter(entries: List<String>) :
+        ArrayAdapter<String>(this@DlListActivity, android.R.layout.simple_list_item_1, entries) {
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val v = super.getView(position, convertView, parent)
+            (v as? TextView)?.setTextColor(NightTint.FG)
+            return v
+        }
     }
 
     override fun onDestroy() {
@@ -50,12 +83,19 @@ class DlListActivity : Activity() {
     }
 
     private fun showDirectory(directory: File?, entries: List<String>) {
-        mBinding.mylv.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, entries)
+        mBinding.mylv.adapter = if (night) NightListAdapter(entries)
+            else ArrayAdapter(this, android.R.layout.simple_list_item_1, entries)
         mBinding.mylv.setOnItemClickListener { _, _, position, _ ->
             val chosenFile = File(directory, entries[position])
             val chosenJson = File(chosenFile, "info.bin")
             when {
                 chosenJson.exists() -> callDownloadActivity(chosenJson)
+                File(chosenFile, NovelStore.META_FILE).exists() -> {
+                    startActivity(
+                        Intent(this, ViewNovelActivity::class.java)
+                            .putExtra(ViewNovelActivity.EXTRA_BOOK, chosenFile.name)
+                    )
+                }
                 chosenFile.isDirectory -> {
                     currentDir = chosenFile
                     startActivity(

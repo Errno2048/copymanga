@@ -277,7 +277,140 @@ if (typeof (loaded) == "undefined") {
                 if (self.isNovelUrl(url)) self.allowNovel();
                 self.applyNight();
                 if (self.isSettingUrl(url)) self.installSettingRows();
+                if (self.isNovelDetailUrl(url)) {
+                    self.loadNovelBook();
+                    self.installNovelDownloadButton();
+                }
+                self.installNovelVolumeHook();
             }, settings.tickMs);
+        },
+
+        // ---------- 小说：下载与原生阅读器 ----------
+
+        novelBook: null,
+        novelHookInstalled: false,
+
+        isNovelDetailUrl: function (url) {
+            return url.replace(/^https?:\/\/[^\/]+/, "").indexOf("/detailsNovel/") >= 0;
+        },
+        // 站点网页自身的接口主机就是把 www 换成 api
+        apiBaseOf: function () {
+            return location.origin.replace("://www.", "://api.").replace("://copy-", "://api.copy-");
+        },
+        novelPathWord: function () {
+            var m = /detailsNovel\/([^\/?#]+)/.exec(location.href);
+            return m ? m[1] : null;
+        },
+        loadNovelBook: function (cb) {
+            var self = this;
+            var pw = self.novelPathWord();
+            if (!pw) return;
+            if (self.novelBook && self.novelBook.pathWord === pw) { if (cb) cb(self.novelBook); return; }
+            var api = self.apiBaseOf();
+            fetch(api + "/api/v3/book/" + pw)
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    var book = j && j.results && j.results.book;
+                    return fetch(api + "/api/v3/book/" + pw + "/volumes").then(function (r) { return r.json(); })
+                        .then(function (vj) {
+                            var list = (vj && vj.results && vj.results.list) || [];
+                            self.novelBook = {
+                                pathWord: pw,
+                                name: (book && book.name) || document.title,
+                                apiBase: api,
+                                volumes: list.map(function (v) { return { id: String(v.id), name: v.name }; })
+                            };
+                            if (cb) cb(self.novelBook);
+                        });
+                })
+                .catch(function () {});
+        },
+        // 卷详情 -> 传给原生的约定结构
+        novelRequestOf: function (book, volumeId, cb) {
+            fetch(book.apiBase + "/api/v3/book/" + book.pathWord + "/volume/" + volumeId)
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    var v = j && j.results && j.results.volume;
+                    if (!v) return;
+                    cb({
+                        pathWord: book.pathWord,
+                        name: book.name,
+                        apiBase: book.apiBase,
+                        volumes: book.volumes,
+                        volume: {
+                            id: String(v.id),
+                            name: v.name,
+                            index: v.index,
+                            txtAddr: v.txt_addr,
+                            encoding: v.txt_encoding,
+                            prev: v.prev == null ? null : String(v.prev),
+                            next: v.next == null ? null : String(v.next),
+                            chapters: (v.contents || []).map(function (c) {
+                                return { name: (c.name || "").trim(), start: c.start_lines, end: c.end_lines };
+                            })
+                        }
+                    });
+                })
+                .catch(function () {});
+        },
+        openNovelVolume: function (book, volumeId) {
+            var self = this;
+            self.novelRequestOf(book, volumeId, function (req) {
+                try { GM.openNovelReader(JSON.stringify(req)); } catch (e) {}
+            });
+        },
+        downloadNovel: function () {
+            var self = this;
+            var book = self.novelBook;
+            if (!book) { self.loadNovelBook(function () { self.downloadNovel(); }); return; }
+            var st = document.getElementById("cm-novel-dl-state");
+            if (st) st.textContent = "已提交";
+            var req = { pathWord: book.pathWord, name: book.name, apiBase: book.apiBase, volumes: book.volumes, volume: null };
+            try { GM.downloadNovel(JSON.stringify(req)); } catch (e) {}
+        },
+        installNovelDownloadButton: function () {
+            if (document.getElementById("cm-novel-dl")) return;
+            var host = document.querySelector("main") || document.body;
+            if (!host) return;
+            var self = this;
+            var wrap = document.createElement("div");
+            wrap.className = "van-cell-group";
+            wrap.innerHTML = '<div class="van-cell" id="cm-novel-dl">'
+                + '<div class="van-cell__title"><span>下载整本小说</span></div>'
+                + '<div class="van-cell__value"><span id="cm-novel-dl-state"></span></div></div>';
+            wrap.addEventListener("click", function (e) {
+                e.stopPropagation();
+                e.preventDefault();
+                self.downloadNovel();
+            });
+            host.insertBefore(wrap, host.firstChild);
+            self.applyNight();
+        },
+        // 卷列表按 DOM 顺序与接口顺序一一对应；已下载的卷交给原生阅读器
+        installNovelVolumeHook: function () {
+            if (this.novelHookInstalled) return;
+            this.novelHookInstalled = true;
+            var self = this;
+            document.addEventListener("click", function (e) {
+                if (!self.isNovelDetailUrl(location.href)) return;
+                var book = self.novelBook;
+                if (!book) return;
+                var el = e.target;
+                while (el && el !== document.body && String(el.className || "").indexOf("chapterItem") < 0) {
+                    el = el.parentElement;
+                }
+                if (!el || el === document.body) return;
+                var items = Array.prototype.slice.call(document.getElementsByClassName("chapterItem"));
+                var idx = items.indexOf(el);
+                if (idx < 0 || !book.volumes[idx]) return;
+                var volumeId = book.volumes[idx].id;
+                var local = false;
+                try { local = GM.isNovelVolumeLocal(book.name, volumeId); } catch (err) {}
+                if (!local) return;
+                e.stopPropagation();
+                e.preventDefault();
+                self.openNovelVolume(book, volumeId);
+            }, true);
         },
 
         // ---------- 漫画：详情页直接拉起阅读器，不显示中间的内容页 ----------

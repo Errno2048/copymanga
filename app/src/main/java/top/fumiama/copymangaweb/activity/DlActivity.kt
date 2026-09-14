@@ -21,10 +21,12 @@ import top.fumiama.copymangaweb.databinding.ActivityDlBinding
 import top.fumiama.copymangaweb.handler.DlHandler
 import top.fumiama.copymangaweb.tool.InsetsTools
 import top.fumiama.copymangaweb.tool.MangaDlTools
+import top.fumiama.copymangaweb.tool.NightTint
 import top.fumiama.copymangaweb.tool.MangaDlTools.Companion.wmdlt
 import top.fumiama.copymangaweb.view.ChapterToggleButton
 import top.fumiama.copymangaweb.view.LazyScrollView
 import top.fumiama.copymangaweb.web.JSHidden
+import top.fumiama.copymangaweb.web.JS
 import top.fumiama.copymangaweb.web.WebChromeClient
 import java.io.File
 import java.lang.Thread.sleep
@@ -62,6 +64,34 @@ class DlActivity : ToolsBoxActivity() {
             loadJSInterface(JSHidden(onLoadChapter = { onHiddenChapterLoaded(it) }))
         } }
         handler.sendEmptyMessage(DlHandler.INITIALIZE_LAYOUTS)
+        applyNight()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        NightTint.applyBars(this, barOrigin)
+    }
+
+    private val night get() = NightTint.on(this)
+    private val barOrigin by lazy { NightTint.captureBars(this) }
+    private val toggleBgRes get() = if (night) R.drawable.toggle_button_dark else R.drawable.toggle_button
+    private val downloadedBgRes get() = if (night) R.drawable.rndbg_downloaded_dark else R.drawable.rndbg_checked
+
+    /** 下载页是原生界面，这里跟随网页端的夜间偏好着色。 */
+    private fun applyNight() {
+        if (!night) return
+        mBinding.root.setBackgroundColor(NightTint.BG)
+        mBinding.dllazys.setBackgroundColor(NightTint.BG)
+        mBinding.ldwn.setBackgroundColor(NightTint.BG)
+        mBinding.ldwndiv.setBackgroundColor(NightTint.DIVIDER)
+        mBinding.dtitle.titlecard.setCardBackgroundColor(NightTint.SURFACE)
+        mBinding.dtitle.ttitle.setTextColor(NightTint.FG)
+        // 下载条用的是很浅的 colorBlue，夜间改成暗色并提高不透明度，避免露出下面的内容
+        mBinding.dldlbar.csdwn.alpha = 1f
+        mBinding.dldlbar.cdwn.setCardBackgroundColor(NightTint.SURFACE)
+        mBinding.dldlbar.tdwn.setTextColor(NightTint.FG)
+        mBinding.dldlbar.textView.setTextColor(NightTint.FG)
+        NightTint.applyBars(this, barOrigin)
     }
 
     override fun onDestroy() {
@@ -186,7 +216,10 @@ class DlActivity : ToolsBoxActivity() {
         Gson().fromJson(json?.reader(), Array<ComicStructure>::class.java)?.let {
             for (group in it) {
                 val tc = layoutInflater.inflate(R.layout.line_caption, mBinding.ldwn, false)
-                tc.findViewById<TextView>(R.id.tcptn).text = group.name
+                tc.findViewById<TextView>(R.id.tcptn).apply {
+                    text = group.name
+                    if (night) setTextColor(NightTint.FG)
+                }
                 mBinding.ldwn.apply { post {
                     addView(
                         tc,
@@ -196,7 +229,9 @@ class DlActivity : ToolsBoxActivity() {
                         )
                     )
                     addView(
-                        layoutInflater.inflate(R.layout.div_h, mBinding.ldwn, false),
+                        layoutInflater.inflate(R.layout.div_h, mBinding.ldwn, false).apply {
+                            if (night) setBackgroundColor(NightTint.DIVIDER)
+                        },
                         ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT
@@ -280,6 +315,10 @@ class DlActivity : ToolsBoxActivity() {
         tbvTbtn.hint = caption
         tbvTbtn.layoutParams.width = btnw
         val zipFile = File("${getExternalFilesDir("")}/$comicName/$caption/$title.zip")
+        if (night) {
+            tbvTbtn.setTextColor(NightTint.FG)
+            if (!zipFile.exists()) tbvTbtn.setBackgroundResource(R.drawable.toggle_button_dark)
+        }
         val zipPosition = if (zipFile.exists()) {
             ViewMangaActivity.zipList.orEmpty().size.also {
                 ViewMangaActivity.zipList = (
@@ -288,7 +327,7 @@ class DlActivity : ToolsBoxActivity() {
             }
         } else null
         if (zipFile.exists()) {
-            tbvTbtn.setBackgroundResource(R.drawable.rndbg_checked)
+            tbvTbtn.setBackgroundResource(downloadedBgRes)
             tbvTbtn.isChecked = false
             tbvTbtn.freezesText = true
         }
@@ -299,8 +338,8 @@ class DlActivity : ToolsBoxActivity() {
         tbvTbtn.setOnClickListener { v ->
             val normalAct = (multiSelect && zipFile.exists()) || !zipFile.exists()
             val tbtn = v.findViewById<ChapterToggleButton>(R.id.tbtn)?:return@setOnClickListener
-            if (zipFile.exists() && !tbtn.isChecked) tbtn.apply { post { setBackgroundResource(R.drawable.rndbg_checked) } }
-            else if(normalAct) tbtn.apply { post { setBackgroundResource(R.drawable.toggle_button) } }
+            if (zipFile.exists() && !tbtn.isChecked) tbtn.apply { post { setBackgroundResource(downloadedBgRes) } }
+            else if(normalAct) tbtn.apply { post { setBackgroundResource(toggleBgRes) } }
             if (normalAct) {
                 mBinding.dldlbar.tdwn.apply {
                     if (tbtn.isChecked) post {
@@ -363,7 +402,7 @@ class DlActivity : ToolsBoxActivity() {
     private fun deleteChapter(f: File, v: ToggleButton) {
         f.delete()
         v.apply { post{
-            setBackgroundResource(R.drawable.toggle_button)
+            setBackgroundResource(toggleBgRes)
             isChecked = false
         } }
     }

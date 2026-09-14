@@ -1,10 +1,15 @@
 package top.fumiama.copymangaweb.web
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import android.webkit.JavascriptInterface
 import top.fumiama.copymangaweb.activity.MainActivity.Companion.wm
 import top.fumiama.copymangaweb.activity.ViewMangaActivity
+import top.fumiama.copymangaweb.activity.ViewNovelActivity
+import top.fumiama.copymangaweb.tool.NovelDownloader
+import top.fumiama.copymangaweb.tool.NovelOpenRequest
+import top.fumiama.copymangaweb.tool.NovelStore
 
 class JS {
     @JavascriptInterface
@@ -55,6 +60,42 @@ class JS {
         const val INVERT_GAIN_KEY = "invert_gain"
         const val INVERT_BLACK_KEY = "invert_black"
     }
+    // ---------- 小说 ----------
+
+    /** 打开原生小说阅读器。metaJson 由页面侧（i.js）从站点接口取好后传入。 */
+    @JavascriptInterface
+    fun openNovelReader(metaJson: String) {
+        val ctx = wm?.get() ?: return
+        val req = runCatching {
+            NovelStore.gson().fromJson(metaJson, NovelOpenRequest::class.java)
+        }.getOrNull() ?: return
+        if (req.name.isBlank()) return
+        NovelStore.merge(ctx, req)
+        ctx.startActivity(
+            Intent(ctx, ViewNovelActivity::class.java)
+                .putExtra(ViewNovelActivity.EXTRA_BOOK, req.name)
+                .putExtra(ViewNovelActivity.EXTRA_VOLUME, req.volume?.id)
+        )
+    }
+
+    /** 整本下载小说（后台逐卷下载正文）。 */
+    @JavascriptInterface
+    fun downloadNovel(metaJson: String) {
+        val ctx = wm?.get() ?: return
+        val req = runCatching {
+            NovelStore.gson().fromJson(metaJson, NovelOpenRequest::class.java)
+        }.getOrNull() ?: return
+        if (req.name.isBlank()) return
+        NovelDownloader.start(ctx, req)
+    }
+
+    /** 该卷是否已在本地：同步返回，供页面在点击时决定走原生阅读器还是网页在线阅读。 */
+    @JavascriptInterface
+    fun isNovelVolumeLocal(bookName: String, volumeId: String): Boolean {
+        val ctx = wm?.get() ?: return false
+        return NovelStore.isVolumeLocal(ctx, bookName, volumeId)
+    }
+
     @JavascriptInterface
     fun hideFab() {
         wm?.get()?.hideFab()

@@ -7,6 +7,7 @@ import android.os.Message
 import android.widget.Toast
 import android.widget.ToggleButton
 import top.fumiama.copymangaweb.R
+import top.fumiama.copymangaweb.tool.NightTint
 import top.fumiama.copymangaweb.activity.DlActivity
 import top.fumiama.copymangaweb.tool.MangaDlTools.Companion.wmdlt
 import java.lang.ref.WeakReference
@@ -97,15 +98,22 @@ class DlHandler(activity: DlActivity, looper: Looper) : Handler(looper) {
             }
             UPDATE_CHAPTER_PROGRESS -> d?.mBinding?.dldlbar?.tdwn?.apply { post { text = "${d?.dldChapter}/${d?.checkedChapter}" } }
             DELETE_SELECTED_CHAPTERS -> d?.deleteChapters()
-            SET_DOWNLOAD_CARD_BLUE -> d?.resources?.getColor(R.color.colorBlue)?.let { d?.mBinding?.dldlbar?.cdwn?.apply { post {
+            SET_DOWNLOAD_CARD_BLUE -> d?.resources?.getColor(cardBlueRes(d))?.let { d?.mBinding?.dldlbar?.cdwn?.apply { post {
                 setCardBackgroundColor(it)
             } } }
-            SET_DOWNLOAD_CARD_RED -> d?.resources?.getColor(R.color.colorRed)?.let { d?.mBinding?.dldlbar?.cdwn?.apply { post {
+            SET_DOWNLOAD_CARD_RED -> d?.resources?.getColor(cardRedRes(d))?.let { d?.mBinding?.dldlbar?.cdwn?.apply { post {
                 setCardBackgroundColor(it)
             } } }
             PAGE_DOWNLOAD_RETRYING -> Toast.makeText(d, "下载${d?.tbtnlist?.get(chapterIndex)?.textOn}的第${pageNumber}页失败，尝试重新下载...", Toast.LENGTH_SHORT).show()
         }
     }
+    /** 夜间用暗色卡片，避免整块浅蓝/浅红在暗色页面里过亮。 */
+    private fun cardBlueRes(d: DlActivity?): Int =
+        if (d != null && NightTint.on(d)) R.color.colorBlueNight else R.color.colorBlue
+
+    private fun cardRedRes(d: DlActivity?): Int =
+        if (d != null && NightTint.on(d)) R.color.colorRedNight else R.color.colorRed
+
     private fun setSize(pageNow: Int, tbtnNo: Int){
         if(refreshSize || size == 0) {
             size = d?.tbtnlist?.get(tbtnNo)?.hash?.let { wmdlt?.get()?.getImgsCountByHash(it) }?:0

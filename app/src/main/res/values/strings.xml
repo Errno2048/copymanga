@@ -18,6 +18,8 @@
     <string name="prev_chapter">上一章</string>
     <string name="next_chapter">下一章</string>
     <string name="line_tone">反色线条补偿</string>
+    <string name="font_dec">A-</string>
+    <string name="font_inc">A+</string>
     <string name="line_tone_black">背景黑度</string>
     <string name="vol_turn_off">音量翻页关</string>
     <string name="vol_turn_on">音量翻页开</string>
