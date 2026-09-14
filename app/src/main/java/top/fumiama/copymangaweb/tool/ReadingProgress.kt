@@ -15,6 +15,8 @@ object ReadingProgress {
     private const val PREF = "reading_progress"
     private const val KEY_COMIC = "comic_"
     private const val KEY_NOVEL = "novel_"
+    /** 每个卷各自记一条：从详情页进入某一卷时能回到该卷自己的位置。 */
+    private const val KEY_NOVEL_VOL = "novelvol_"
 
     class ComicProgress(
         val pathWord: String,
@@ -92,22 +94,36 @@ object ReadingProgress {
             addProperty("offset", offset)
             addProperty("at", System.currentTimeMillis())
         }
-        prefs(context).edit().putString(KEY_NOVEL + book, obj.toString()).apply()
+        val raw = obj.toString()
+        prefs(context).edit()
+            .putString(KEY_NOVEL + book, raw)
+            .putString(KEY_NOVEL_VOL + book + "_" + volumeId, raw)
+            .apply()
+    }
+
+    /** 某一卷自己的阅读位置；没有记录返回 null。 */
+    fun novelInVolume(context: Context, book: String, volumeId: String): NovelProgress? {
+        if (book.isBlank() || volumeId.isBlank()) return null
+        val raw = prefs(context).getString(KEY_NOVEL_VOL + book + "_" + volumeId, null)
+            ?: return null
+        return parseNovel(raw)
     }
 
     fun novel(context: Context, book: String): NovelProgress? {
         if (book.isBlank()) return null
         val raw = prefs(context).getString(KEY_NOVEL + book, null) ?: return null
-        return runCatching {
-            val o = JsonParser.parseString(raw).asJsonObject
-            NovelProgress(
-                o.get("volumeId")?.asString.orEmpty(),
-                o.get("volumeName")?.asString.orEmpty(),
-                o.get("chapterIndex")?.asInt ?: 0,
-                o.get("chapterName")?.asString.orEmpty(),
-                o.get("page")?.asInt ?: 0,
-                o.get("offset")?.asInt ?: 0
-            )
-        }.getOrNull()
+        return parseNovel(raw)
     }
+
+    private fun parseNovel(raw: String): NovelProgress? = runCatching {
+        val o = JsonParser.parseString(raw).asJsonObject
+        NovelProgress(
+            o.get("volumeId")?.asString.orEmpty(),
+            o.get("volumeName")?.asString.orEmpty(),
+            o.get("chapterIndex")?.asInt ?: 0,
+            o.get("chapterName")?.asString.orEmpty(),
+            o.get("page")?.asInt ?: 0,
+            o.get("offset")?.asInt ?: 0
+        )
+    }.getOrNull()
 }

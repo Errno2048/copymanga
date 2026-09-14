@@ -8,6 +8,8 @@ import top.fumiama.copymangaweb.activity.MainActivity.Companion.wm
 import top.fumiama.copymangaweb.activity.ViewMangaActivity
 import top.fumiama.copymangaweb.activity.ViewNovelActivity
 import top.fumiama.copymangaweb.tool.NovelDownloader
+import top.fumiama.copymangaweb.tool.ReadingProgress
+import java.io.File
 import top.fumiama.copymangaweb.tool.NovelOpenRequest
 import top.fumiama.copymangaweb.tool.NovelStore
 
@@ -102,6 +104,61 @@ class JS {
     fun isNovelVolumeLocal(bookName: String, volumeId: String): Boolean {
         val ctx = wm?.get() ?: return false
         return NovelStore.isVolumeLocal(ctx, bookName, volumeId)
+    }
+
+    /**
+     * 最近一次读的小说卷（JSON；没有返回空串）。详情页据此把按钮文案改成「續看 <卷名>」，
+     * 点击即回到该卷上次的位置。
+     */
+    @JavascriptInterface
+    fun lastNovelVolume(bookName: String): String {
+        val ctx = wm?.get() ?: return ""
+        val prog = ReadingProgress.novel(ctx, bookName) ?: return ""
+        return NovelStore.gson().toJson(prog)
+    }
+
+    /**
+     * 某本漫画最近一次阅读：优先本地已下载的记录（zip:<漫画名>），否则用在线记录。
+     * 返回 {chapterId, chapterName, page, local, comicName}；没有进度返回空串。
+     */
+    @JavascriptInterface
+    fun lastComicChapter(pathWord: String, comicName: String): String {
+        val ctx = wm?.get() ?: return ""
+        val local = comicName.takeIf { it.isNotBlank() }
+            ?.let { ReadingProgress.comic(ctx, "zip:$it") }
+        val online = pathWord.takeIf { it.isNotBlank() }
+            ?.let { ReadingProgress.comic(ctx, it) }
+        val p = local ?: online ?: return ""
+        val o = com.google.gson.JsonObject()
+        o.addProperty("chapterId", p.chapterId)
+        o.addProperty("chapterName", p.chapterName)
+        o.addProperty("page", p.page)
+        o.addProperty("total", p.total)
+        o.addProperty("local", p === local)
+        o.addProperty("comicName", comicName)
+        return o.toString()
+    }
+
+    /** 打开已下载的漫画章节（本地 zip）：按 <漫画名>/<话>/<话>.zip 定位。 */
+    @JavascriptInterface
+    fun openLocalComic(comicName: String, zipName: String): Boolean {
+        val ctx = wm?.get() ?: return false
+        val root = File(ctx.getExternalFilesDir(""), comicName)
+        val dir = root.listFiles()?.firstOrNull { d ->
+            d.isDirectory && d.listFiles()?.any { it.isFile && it.name == zipName } == true
+        } ?: return false
+        val files = dir.listFiles()?.toList().orEmpty()
+        val zip = files.firstOrNull { it.isFile && it.name == zipName } ?: return false
+        val zips = files.filter { it.isFile && it.extension.equals("zip", true) }
+        ViewMangaActivity.zipFile = zip
+        ViewMangaActivity.titleText = zip.name
+        ViewMangaActivity.zipPosition = zips.indexOf(zip)
+        ViewMangaActivity.zipList = zips.toTypedArray()
+        ViewMangaActivity.cd = dir
+        ViewMangaActivity.nextChapterUrl = null
+        ViewMangaActivity.previousChapterUrl = null
+        ctx.startActivity(android.content.Intent(ctx, ViewMangaActivity::class.java))
+        return true
     }
 
     @JavascriptInterface

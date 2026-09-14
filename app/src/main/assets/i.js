@@ -306,6 +306,7 @@ if (typeof (loaded) == "undefined") {
                     self.loadNovelBook();
                     self.installNovelDownloadButton();
                 }
+                self.installContinueButton();
                 self.installNovelVolumeHook();
                 self.installPersonalHooks();
                 self.fixPersonalTab();
@@ -581,6 +582,121 @@ if (typeof (loaded) == "undefined") {
             var req = { pathWord: book.pathWord, name: book.name, apiBase: book.apiBase, volumes: book.volumes, volume: null };
             try { GM.downloadNovel(JSON.stringify(req)); } catch (e) {}
         },
+        // ---------------- 详情页「續看」 ----------------
+        // 详情页的主按钮文本改成最近一次读的卷/话，点击直接回到那个位置。
+        detailKind: function () {
+            var p = location.pathname;
+            if (p.indexOf("/detailsNovel/") >= 0) return "novel";
+            if (/\/details\/[^\/]+\/[^\/?#]+\/?$/.test(p)) return "comic";
+            return "";
+        },
+        comicPathWord: function () {
+            var m = /\/details\/[^\/]+\/([^\/?#]+)/.exec(location.href);
+            return m ? m[1] : "";
+        },
+        detailActionButton: function () {
+            var bs = document.querySelectorAll("button.van-button, .van-button");
+            for (var i = 0; i < bs.length; i++) {
+                var t = (bs[i].textContent || "").trim();
+                if (/^(開始|开始|續看|续看|續讀)/.test(t)) return bs[i];
+            }
+            return null;
+        },
+        // 漫画名（下载目录用的就是它），按 pathWord 缓存
+        comicName: function (pw, cb) {
+            var self = this;
+            self._comicNames = self._comicNames || {};
+            if (self._comicNames[pw]) { cb(self._comicNames[pw]); return; }
+            fetch(self.apiBaseOf() + "/api/v3/comic2/" + pw)
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    var n = j && j.results && j.results.comic && j.results.comic.name;
+                    if (!n) return;
+                    self._comicNames[pw] = n;
+                    cb(n);
+                })
+                .catch(function () {});
+        },
+        installContinueButton: function () {
+            var kind = this.detailKind();
+            if (!kind) return;
+            var self = this;
+            if (!self._continueHooked) {
+                self._continueHooked = true;
+                // 捕获阶段拦截：先于站点自己的点击处理，避免它按服务端进度跳走
+                document.addEventListener("click", function (e) {
+                    var el = e.target && e.target.closest ? e.target.closest("[data-cm-continue]") : null;
+                    if (!el) return;
+                    var info = self._continueInfo;
+                    if (!info) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    self.openContinue(info);
+                }, true);
+            }
+            if (kind === "novel") {
+                var book = self.novelBook;
+                if (!book) { self.loadNovelBook(); return; }
+                var raw = "";
+                try { if (typeof GM.lastNovelVolume === "function") raw = GM.lastNovelVolume(book.name); } catch (e) {}
+                if (!raw) return;
+                var info;
+                try { info = JSON.parse(raw); } catch (e) { return; }
+                if (!info || !info.volumeId) return;
+                info.kind = "novel";
+                info.name = info.volumeName || "";
+                self.applyContinueButton(info);
+                return;
+            }
+            var pw = self.comicPathWord();
+            if (!pw) return;
+            self._comicInfos = self._comicInfos || {};
+            if (self._comicInfos[pw]) { self.applyContinueButton(self._comicInfos[pw]); return; }
+            // 先按已知的漫画名查一次（没有就走在线进度），名字取到后再查一次本地下载的记录
+            var tryInfo = function (name) {
+                if (self._comicInfos[pw]) return;
+                var raw = "";
+                try { if (typeof GM.lastComicChapter === "function") raw = GM.lastComicChapter(pw, name || ""); } catch (e) {}
+                if (!raw) return;
+                var info;
+                try { info = JSON.parse(raw); } catch (e) { return; }
+                if (!info || !info.chapterId) return;
+                info.kind = "comic";
+                info.pathWord = pw;
+                info.comicName = name || "";
+                info.name = info.chapterName || "";
+                self._comicInfos[pw] = info;
+                self.applyContinueButton(info);
+            };
+            tryInfo(self._comicNames && self._comicNames[pw]);
+            self.comicName(pw, tryInfo);
+        },
+        applyContinueButton: function (info) {
+            var btn = this.detailActionButton();
+            if (!btn) return;
+            var label = "續看 " + (info.name || "");
+            if ((btn.textContent || "").trim() !== label) btn.textContent = label;
+            btn.setAttribute("data-cm-continue", "1");
+            this._continueInfo = info;
+        },
+        openContinue: function (info) {
+            if (info.kind === "novel") {
+                var book = this.novelBook;
+                if (!book) return;
+                this.openNovelVolume(book, info.volumeId);
+                return;
+            }
+            if (info.local) {
+                try {
+                    if (typeof GM.openLocalComic === "function"
+                        && GM.openLocalComic(info.comicName, info.chapterId)) return;
+                } catch (e) {}
+            }
+            try {
+                GM.loadComicDirect("https://cm.local/comicContent/" + info.pathWord + "/" + info.chapterId);
+            } catch (e) {}
+        },
+
         installNovelDownloadButton: function () {
             if (document.getElementById("cm-novel-dl")) return;
             var host = document.querySelector("main") || document.body;

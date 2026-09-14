@@ -664,23 +664,42 @@ class ViewMangaActivity : ToolsBoxActivity() {
     }
 
     /** 上一次读到的位置：同一章直接回到该页。 */
+    /**
+     * 进度键：在线阅读用详情页 pathWord；读已下载的 zip 用漫画名（zip:<漫画名>）。
+     * zip 的目录结构是 <漫画名>/<话>/<话>.zip，所以漫画名取上两级目录。
+     */
+    private fun progressKey(): String? = if (dlZip2View) {
+        val name = mangaZip?.parentFile?.parentFile?.name
+            ?: DlActivity.comicName.takeIf { it.isNotBlank() }
+        name?.takeIf { it.isNotBlank() }?.let { "zip:$it" }
+    } else {
+        chapterPathWord()
+    }
+
+    /** 进度里的「章节」标识：在线用章节 id，本地用 zip 文件名。 */
+    private fun progressChapterId(): String? =
+        if (dlZip2View) mangaZip?.name else chapterId()
+
+    private fun progressChapterName(): String =
+        if (dlZip2View) mangaZip?.nameWithoutExtension ?: titleText else titleText
+
     private fun restoreReadingProgress() {
-        val pathWord = chapterPathWord() ?: return
-        val chapterId = chapterId() ?: return
+        val key = progressKey() ?: return
+        val cid = progressChapterId() ?: return
         if (pn != FIRST_PAGE) return          // 调用方已指定起始页（如切章）
-        val saved = ReadingProgress.comic(this, pathWord) ?: return
-        if (saved.chapterId != chapterId || saved.page <= 0) return
+        val saved = ReadingProgress.comic(this, key) ?: return
+        if (saved.chapterId != cid || saved.page <= 0) return
         pn = saved.page
         Log.d("MyVM", "resume at page ${saved.page} of ${saved.chapterName}")
     }
 
     private fun saveReadingProgress() {
-        val pathWord = chapterPathWord() ?: return
-        val chapterId = chapterId() ?: return
+        val key = progressKey() ?: return
+        val cid = progressChapterId() ?: return
         val page = runCatching { getPageNumber() }.getOrDefault(0)
         if (page <= 0) return
-        ReadingProgress.saveComic(this, pathWord, chapterId, titleText, page, count)
-        Log.d("MyVM", "save progress $pathWord/$chapterId page=$page/$count")
+        ReadingProgress.saveComic(this, key, cid, progressChapterName(), page, count)
+        Log.d("MyVM", "save progress $key/$cid page=$page/$count")
     }
 
     private fun chapterPathWord(): String? =
@@ -691,7 +710,8 @@ class ViewMangaActivity : ToolsBoxActivity() {
 
     override fun onPause() {
         super.onPause()
-        if (!dlZip2View) saveReadingProgress()
+        // 已下载的 zip 也记录进度（键用 zip:<漫画名>）
+        saveReadingProgress()
     }
 
     private fun getPageNumber(): Int {

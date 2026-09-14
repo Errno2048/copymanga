@@ -78,6 +78,13 @@ class ViewNovelActivity : Activity() {
     private var pendingRestoreOffset = -1
     /** 重排期间抑制进度写入：notifyDataSetChanged 会先回调一次 onPageSelected(0) */
     private var suppressProgressSave = false
+    /**
+     * 正文区上下留白：默认 44dp/40dp；设备刘海或导航栏更大时按安全区加宽，
+     * 否则上方的章节名 / 下方的电量时间会压到正文上。
+     */
+    private var textPadTop = 0
+    private var textPadBottom = 0
+    private var observedNavBottom = 0
     /** 换章过渡用的截图缓冲（复用，避免每次换章都重新分配） */
     private var slideBitmap: Bitmap? = null
     /** 换章过渡进行中 */
@@ -145,6 +152,8 @@ class ViewNovelActivity : Activity() {
         // 正文框固定：不把安全区做成根布局内边距，否则系统栏一显隐正文区尺寸就变，
         // 分页跟着重排、阅读位置被顶掉。安全区只加在上下栏自己身上。
         applyBarInsets()
+        textPadTop = dp(44)
+        textPadBottom = dp(40)
         fontSize = getSharedPreferences(PREF, MODE_PRIVATE).getFloat(KEY_FONT, 18f)
         applyNight()
         wireUi()
@@ -246,9 +255,33 @@ class ViewNovelActivity : Activity() {
             mBinding.vntopchapter.setPadding(0, bars.top, 0, 0)
             mBinding.vnstatusline.setPadding(0, 0, 0, bars.bottom)
             mBinding.vntocoverlay.setPadding(0, bars.top, 0, bars.bottom)
+            // 正文留白：默认 44/40dp，遇到刘海或较高的导航栏再让开
+            val cutTop = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).top
+            val navBottom = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
+            if (navBottom > observedNavBottom) observedNavBottom = navBottom
+            val newTop = maxOf(dp(44), cutTop + dp(40))
+            val newBottom = maxOf(dp(40), observedNavBottom + dp(24))
+            if (newTop != textPadTop || newBottom != textPadBottom) {
+                textPadTop = newTop
+                textPadBottom = newBottom
+                applyTextPaddings()
+                rebuildPages()
+            }
             insets
         }
         ViewCompat.requestApplyInsets(mBinding.vnroot)
+    }
+
+    /** 把留白应用到两种模式的正文容器；渐变遮罩高度跟着上留白走。 */
+    private fun applyTextPaddings() {
+        mBinding.vnscroll.setPadding(dp(20), textPadTop, dp(20), textPadBottom)
+        mBinding.vnfadetop.layoutParams = mBinding.vnfadetop.layoutParams.also {
+            it.height = textPadTop
+        }
+        mBinding.vnfadebottom.layoutParams = mBinding.vnfadebottom.layoutParams.also {
+            it.height = textPadBottom
+        }
+        mBinding.vnvp.adapter?.notifyDataSetChanged()
     }
 
     private fun hideSystemBars() {
@@ -636,11 +669,13 @@ class ViewNovelActivity : Activity() {
             finishOnUi()
             return
         }
-        val sameVolume = saved != null && saved.volumeId == v.id
-        val startChapter = if (sameVolume) saved!!.chapterIndex else 0
+        // 该卷自己的记录优先：从详情页点进任意一卷，都能回到那一卷上次读到的位置
+        val pos = ReadingProgress.novelInVolume(this, book, v.id)
+            ?: saved?.takeIf { it.volumeId == v.id }
+        val startChapter = pos?.chapterIndex ?: 0
         // 优先按字符偏移恢复位置（页码会随字号变化），旧数据没有偏移才回退到页码
-        val startOffset = if (sameVolume && saved!!.offset > 0) saved!!.offset else -1
-        val startPage = if (sameVolume && startOffset < 0) saved!!.page else 0
+        val startOffset = if ((pos?.offset ?: 0) > 0) pos!!.offset else -1
+        val startPage = if (startOffset < 0) (pos?.page ?: 0) else 0
         loadVolume(v, startChapter, startPage, startOffset)
     }
 
@@ -708,7 +743,7 @@ class ViewNovelActivity : Activity() {
         val cw = mBinding.vnroot.width - mBinding.vnroot.paddingLeft - mBinding.vnroot.paddingRight
         val chh = mBinding.vnroot.height - mBinding.vnroot.paddingTop - mBinding.vnroot.paddingBottom
         val w = cw - dp(40)
-        val h = chh - dp(84)
+        val h = chh - textPadTop - textPadBottom
         if (w <= 0 || h <= 0) {
             Log.d("NovelReader", "skip rebuild, box=$w x $h")
             return
@@ -869,7 +904,7 @@ class ViewNovelActivity : Activity() {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                setPadding(dp(20), dp(44), dp(20), dp(40))
+                setPadding(dp(20), textPadTop, dp(20), textPadBottom)
             }
             val iv = ImageView(ctx).apply {
                 layoutParams = FrameLayout.LayoutParams(
@@ -877,7 +912,7 @@ class ViewNovelActivity : Activity() {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     Gravity.CENTER
                 )
-                setPadding(dp(20), dp(44), dp(20), dp(40))
+                setPadding(dp(20), textPadTop, dp(20), textPadBottom)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 visibility = View.GONE
             }
