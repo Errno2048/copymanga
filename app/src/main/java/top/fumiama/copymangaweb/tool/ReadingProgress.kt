@@ -85,6 +85,7 @@ object ReadingProgress {
             addProperty("volumeName", volumeName)
             addProperty("chapterIndex", chapterIndex)
             addProperty("chapterName", chapterName)
+            addProperty("page", page)
             addProperty("at", System.currentTimeMillis())
         }
         prefs(context).edit().putString(KEY_NOVEL + book, obj.toString()).apply()

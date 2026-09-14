@@ -41,7 +41,6 @@
             android:breakStrategy="simple"
             android:hyphenationFrequency="none"
             android:includeFontPadding="false"
-            android:lineSpacingExtra="6dp"
             tools:text="正文" />
     </ScrollView>
 

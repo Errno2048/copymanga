@@ -285,6 +285,7 @@ class ViewNovelActivity : Activity() {
         val v = vol ?: return
         val ch = v.chapters.getOrNull(chapterIndex) ?: return
         mBinding.vnscrolltext.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSize)
+        mBinding.vnscrolltext.setLineSpacing(dpf(LINE_SPACING_DP), 1f)
         mBinding.vnscrolltext.setTextColor(if (night) NightTint.FG else 0xFF333333.toInt())
         mBinding.vnscrolltext.text = NovelStore.chapterText(fullText, ch)
     }
@@ -315,10 +316,19 @@ class ViewNovelActivity : Activity() {
         return inner > 0 && layout.width == inner
     }
 
+    /** 滚动到底时最大可滚位置（末页页顶可能超出它，需要单独判定） */
+    private fun scrollMaxY(): Int {
+        val tv = mBinding.vnscrolltext
+        return (tv.height + mBinding.vnscroll.paddingTop + mBinding.vnscroll.paddingBottom -
+            mBinding.vnscroll.height).coerceAtLeast(0)
+    }
+
     /** 视口顶端算第几页：按页顶像素边界取最近的一页，比「行 -> 字符」反查精确 */
     private fun scrollTopPage(): Int {
         if (pageTops.isEmpty()) return 0
         val y = mBinding.vnscroll.scrollY
+        // 滚到底就是最后一页（末页页顶滚不到视口顶端，按最近页会差一页）
+        if (y >= scrollMaxY() - 2) return pageTops.size - 1
         var idx = 0
         for (i in pageTops.indices) {
             if (pageTops[i] <= y + 2) idx = i else break
@@ -555,7 +565,7 @@ class ViewNovelActivity : Activity() {
             // 断行策略与滚动模式的 TextView 保持一致，两种模式的换行位置才相同
             val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, w)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(dp(6).toFloat(), 1f)
+                .setLineSpacing(dpf(LINE_SPACING_DP), 1f)
                 .setIncludePad(false)
                 .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
                 .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
@@ -737,6 +747,10 @@ class ViewNovelActivity : Activity() {
 
     private fun dp(v: Int): Int = (resources.displayMetrics.density * v).toInt()
 
+    /** 与 dp 同样的换算但保留小数：行距等排版参数必须两种模式完全一致，
+     *  否则每行差 1px，到几百页就会累积成一页以上的偏差。 */
+    private fun dpf(v: Float): Float = resources.displayMetrics.density * v
+
     private fun sp(v: Float): Float =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
 
@@ -753,6 +767,8 @@ class ViewNovelActivity : Activity() {
         const val EXTRA_VOLUME = "volume"
         private const val PREF = "novel_reader"
         private const val KEY_FONT = "font_size"
+        /** 正文行距（dp）；分页与滚动必须用同一个值 */
+        private const val LINE_SPACING_DP = 6f
         private const val MIN_FONT = 12f
         private const val MAX_FONT = 32f
         /** 重排后保持当前阅读位置 */
