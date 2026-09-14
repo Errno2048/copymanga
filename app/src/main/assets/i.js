@@ -282,7 +282,187 @@ if (typeof (loaded) == "undefined") {
                     self.installNovelDownloadButton();
                 }
                 self.installNovelVolumeHook();
+                self.installPersonalHooks();
+                self.fixPersonalTab();
+                // 未登录却还留着上一次的身份/缓存时兜底清理
+                if (self.loggedIn()) self.accountCleared = false;
+                else if (!self.accountCleared) {
+                    self.accountCleared = true;
+                    self.clearAccount();
+                }
+                self.backToPersonalIfNeeded();
+                self.correctPersonalTabLanding();
             }, settings.tickMs);
+        },
+
+        // ---------- 个人页：取消“必须先登录才能进入”的限制 ----------
+        //
+        // 站点本身允许未登录渲染 /personal（会显示登录引导），底部栏却在未登录时
+        // 把「個人」换成 to:"/login" 的「去登陸」，导致从界面上根本进不去个人页。
+        // 另外站点的登出（deleteToken）只清了 token 与 localStorage.user，
+        // 没有清 Vuex 里缓存的身份与书架/浏览记录，会残留上一次登录的信息。
+
+        PERSONAL_TEXTS: ["個人資料", "留言專區", "書架", "瀏覽記錄",
+                         "个人资料", "留言专区", "书架", "浏览记录"],
+        LOGIN_TAB_TEXTS: ["去登陸", "去登陆", "去登录"],
+        PERSONAL_TAB_LABEL: { "去登陸": "個人", "去登陆": "个人", "去登录": "个人" },
+        LOGOUT_TEXTS: ["登出", "退出登錄", "退出登录"],
+        personalHookInstalled: false,
+        accountCleared: false,
+
+        isPersonalUrl: function (url) {
+            var path = url.replace(/^https?:\/\/[^\/]+/, "");
+            return /(^|\/)personal(\/|$|\?)/.test(path) && path.indexOf("/personal/") !== 0
+                || /^\/(h5\/)?personal(\/|$|\?)/.test(path);
+        },
+        storeOf: function () {
+            try {
+                var root = this.vueRoot();
+                return root && root.$store ? root.$store : null;
+            } catch (e) { return null; }
+        },
+        loggedIn: function () {
+            var store = this.storeOf();
+            return !!(store && store.state && store.state.token);
+        },
+        // 清掉上一次登录遗留的身份与缓存（登出后站点没清干净）
+        clearAccount: function () {
+            var store = this.storeOf();
+            if (!store) return;
+            try { store.commit("deleteToken"); } catch (e) {}
+            try {
+                var st = store.state;
+                st.personalData = {};
+                st.bookRack = {};
+                st.bookrack = {};
+                st.personal = {};
+                if (st.cache) {
+                    var cache = Object.assign({}, st.cache);
+                    delete cache.bookrack;
+                    delete cache.personalRecord;
+                    delete cache.details;
+                    st.cache = cache;
+                }
+            } catch (e) {}
+            try { localStorage.removeItem("user"); } catch (e) {}
+        },
+        // 未登录时底部栏那一项是「去登陸」，改成「個人」并标记，点击时进个人页
+        fixPersonalTab: function () {
+            var items = document.getElementsByClassName("van-tabbar-item");
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                var textEl = item.getElementsByClassName("van-tabbar-item__text")[0];
+                if (!textEl) continue;
+                var text = (textEl.innerText || "").trim();
+                if (this.LOGIN_TAB_TEXTS.indexOf(text) < 0) continue;
+                item.setAttribute("data-cm-personal", "1");
+                var label = this.PERSONAL_TAB_LABEL[text];
+                var span = textEl.getElementsByTagName("span")[0] || textEl;
+                if (label && span.textContent !== label) span.textContent = label;
+                this.fixPersonalIcon(item);
+            }
+        },
+        // 图标也要从「登录」换成「个人」
+        fixPersonalIcon: function (item) {
+            var iconEl = item.getElementsByClassName("van-tabbar-item__icon")[0];
+            if (!iconEl) return;
+            var use = iconEl.getElementsByTagName("use")[0];
+            if (use) {
+                if (use.getAttribute("xlink:href") !== "#icontab_btn_nor_my-2") {
+                    use.setAttribute("xlink:href", "#icontab_btn_nor_my-2");
+                    use.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#icontab_btn_nor_my-2");
+                }
+                return;
+            }
+            if (iconEl.getAttribute("data-cm-icon") === "1") return;
+            iconEl.setAttribute("data-cm-icon", "1");
+            iconEl.textContent = "";
+            var svgNs = "http://www.w3.org/2000/svg";
+            var svg = document.createElementNS(svgNs, "svg");
+            svg.setAttribute("class", "icon");
+            svg.setAttribute("aria-hidden", "true");
+            var u = document.createElementNS(svgNs, "use");
+            u.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#icontab_btn_nor_my-2");
+            svg.appendChild(u);
+            iconEl.appendChild(svg);
+        },
+        // 点了底部栏的个人入口却落到登录页时，改去个人页
+        correctPersonalTabLanding: function () {
+            var flag = false;
+            try { flag = sessionStorage.getItem("cm_login_tab_click") === "1"; } catch (e) {}
+            if (!flag) return;
+            if (this.isPersonalUrl(location.href)) {
+                try { sessionStorage.removeItem("cm_login_tab_click"); } catch (e) {}
+                return;
+            }
+            var path = location.href.replace(/^https?:\/\/[^\/]+/, "");
+            if (/\/login(\/|$|\?)/.test(path)) {
+                try { sessionStorage.removeItem("cm_login_tab_click"); } catch (e) {}
+                if (!this.loggedIn()) {
+                    try { this.vueRoot().$router.replace("/personal"); } catch (e) {}
+                }
+            } else {
+                try { sessionStorage.removeItem("cm_login_tab_click"); } catch (e) {}
+            }
+        },
+        goLogin: function () {
+            try { sessionStorage.setItem("cm_back_personal", "1"); } catch (e) {}
+            try { this.vueRoot().$router.push("/login"); } catch (e) {}
+        },
+        // 登录成功后回到个人页（站点登录后默认跳首页）
+        backToPersonalIfNeeded: function () {
+            var pending = false;
+            try { pending = sessionStorage.getItem("cm_back_personal") === "1"; } catch (e) {}
+            if (!pending || !this.loggedIn()) return;
+            try { sessionStorage.removeItem("cm_back_personal"); } catch (e) {}
+            if (this.isPersonalUrl(location.href)) return;
+            var self = this;
+            setTimeout(function () {
+                try { self.vueRoot().$router.replace("/personal"); } catch (e) {}
+            }, 400);
+        },
+        installPersonalHooks: function () {
+            if (this.personalHookInstalled) return;
+            this.personalHookInstalled = true;
+            var self = this;
+            document.addEventListener("click", function (e) {
+                var text = (e.target && e.target.innerText ? e.target.innerText : "").trim();
+                // 登出：让站点自己发请求，之后再兜底清一次（含 Vuex 缓存）
+                if (text.length <= 8 && self.LOGOUT_TEXTS.indexOf(text) >= 0) {
+                    setTimeout(function () { self.clearAccount(); }, 1500);
+                }
+                // 1) 底部栏「去登陸」-> 个人页
+                // 注意：不能用 indexOf("van-tabbar-item")，它会先匹配到
+                // van-tabbar-item__icon（图标容器），必须精确匹配类名
+                var node = e.target;
+                while (node && node !== document.body &&
+                       !(node.classList && node.classList.contains("van-tabbar-item"))) {
+                    node = node.parentElement;
+                }
+                if (node && node !== document.body &&
+                    node.getAttribute("data-cm-personal") === "1") {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    // 站点自己的处理器在真实触摸下仍可能把地址推到 /login，
+                    // 这里留个标记，落地时再纠正一次（见 correctPersonalTabLanding）
+                    try { sessionStorage.setItem("cm_login_tab_click", "1"); } catch (err) {}
+                    try { self.vueRoot().$router.push("/personal"); } catch (err) {}
+                    return;
+                }
+                // 2) 未登录时，需登录的功能 -> 登录页
+                if (!self.isPersonalUrl(location.href) || self.loggedIn()) return;
+                var el = e.target;
+                while (el && el !== document.body) {
+                    var t = (el.innerText || "").trim();
+                    if (t && t.length <= 8 && self.PERSONAL_TEXTS.indexOf(t) >= 0) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        self.goLogin();
+                        return;
+                    }
+                    el = el.parentElement;
+                }
+            }, true);
         },
 
         // ---------- 小说：下载与原生阅读器 ----------
