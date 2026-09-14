@@ -1,7 +1,12 @@
 package top.fumiama.copymangaweb.activity
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Typeface
 import android.os.BatteryManager
@@ -18,6 +23,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import kotlin.math.abs
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
@@ -72,6 +78,11 @@ class ViewNovelActivity : Activity() {
     private var pendingRestoreOffset = -1
     /** 重排期间抑制进度写入：notifyDataSetChanged 会先回调一次 onPageSelected(0) */
     private var suppressProgressSave = false
+    /** 换章过渡用的截图缓冲（复用，避免每次换章都重新分配） */
+    private var slideBitmap: Bitmap? = null
+    /** 换章过渡进行中 */
+    private var sliding = false
+    private var slideAnim: ValueAnimator? = null
     // 边界滑动换章的按下起点
     private var swipeDownX = 0f
     private var swipeDownY = 0f
@@ -181,6 +192,8 @@ class ViewNovelActivity : Activity() {
     }
 
     override fun onDestroy() {
+        slideAnim?.cancel()
+        slideAnim = null
         ui.removeCallbacksAndMessages(null)
         io.shutdownNow()
         super.onDestroy()
@@ -511,6 +524,7 @@ class ViewNovelActivity : Activity() {
     // ---------------- 翻页 / 翻章 ----------------
 
     private fun turnPage(delta: Int) {
+        if (sliding) return
         val target = mBinding.vnvp.currentItem + delta
         if (target in pages.indices) {
             mBinding.vnvp.setCurrentItem(target, true)
@@ -523,7 +537,7 @@ class ViewNovelActivity : Activity() {
         val v = vol ?: return
         val target = chapterIndex + delta
         if (target in v.chapters.indices) {
-            selectChapter(target, if (delta > 0) 0 else Int.MAX_VALUE)
+            toChapter(target, delta)
             return
         }
         val adjacentId = if (delta > 0) v.next else v.prev
@@ -540,6 +554,58 @@ class ViewNovelActivity : Activity() {
             }
             loadVolume(adjacent, if (delta > 0) 0 else (adjacent.chapters.size - 1).coerceAtLeast(0), 0)
         }
+    }
+
+    /**
+     * 换到相邻章节：翻页模式下先截下当前画面，换章后让新内容从翻页方向滑入、
+     * 旧画面同步滑出，视觉上与章节内翻页一致；滚动模式或跨卷（要联网取卷）不做动画。
+     */
+    private fun toChapter(index: Int, delta: Int) {
+        if (sliding) return
+        val snap = if (!scrollMode) capturePager() else null
+        selectChapter(index, if (delta > 0) 0 else Int.MAX_VALUE)
+        if (snap == null) return
+        val w = mBinding.vnvp.width.toFloat()
+        val dir = if (delta > 0) 1f else -1f
+        sliding = true
+        mBinding.vnslide.setImageBitmap(snap)
+        mBinding.vnslide.visibility = View.VISIBLE
+        mBinding.vnslide.translationX = 0f
+        // 新内容先挪出屏幕，等这一帧的布局完成后才开始动画，避免首帧闪出终态
+        mBinding.vnvp.translationX = dir * w
+        // 两层必须由同一个进度驱动：分别用各自的动画会因启动时刻不同而错位，
+        // 接缝处就会露出底色
+        val anim = ValueAnimator.ofFloat(0f, 1f).setDuration(SLIDE_MS)
+        anim.interpolator = DecelerateInterpolator()
+        anim.addUpdateListener { a ->
+            val p = a.animatedFraction
+            mBinding.vnslide.translationX = -dir * w * p
+            mBinding.vnvp.translationX = dir * w * (1f - p)
+        }
+        anim.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                mBinding.vnslide.visibility = View.GONE
+                mBinding.vnslide.setImageDrawable(null)
+                mBinding.vnvp.translationX = 0f
+                slideAnim = null
+                sliding = false
+            }
+        })
+        slideAnim = anim
+        // 等这一帧布局完成再起步：新章内容先摆好，动画第一帧就不会是空页
+        mBinding.vnvp.post { anim.start() }
+    }
+
+    /** 把当前可见页画进一张位图（换章过渡用，缓冲复用） */
+    private fun capturePager(): Bitmap? {
+        val w = mBinding.vnvp.width
+        val h = mBinding.vnvp.height
+        if (w <= 0 || h <= 0) return null
+        val bmp = slideBitmap?.takeIf { it.width == w && it.height == h }
+            ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { slideBitmap = it }
+        bmp.eraseColor(if (night) NightTint.BG else 0xFFFCFCFF.toInt())
+        mBinding.vnvp.draw(Canvas(bmp))
+        return bmp
     }
 
     private fun changeFont(delta: Float) {
@@ -857,12 +923,15 @@ class ViewNovelActivity : Activity() {
         mBinding.vnfadetop.setBackgroundResource(R.drawable.fade_top_dark)
         mBinding.vnfadebottom.setBackgroundResource(R.drawable.fade_bottom_dark)
         for (b in listOf(
-            mBinding.vnback, mBinding.vntoc, mBinding.vnfontdec,
+            mBinding.vntoc, mBinding.vnfontdec,
             mBinding.vnfontinc, mBinding.vnprev, mBinding.vnnext, mBinding.vnmode
         )) {
             b.setTextColor(NightTint.FG)
             b.setBackgroundResource(R.drawable.reader_btn_dark)
         }
+        // 返回键是 ImageButton（矢量箭头），底色与上栏一致，只换图标颜色
+        mBinding.vnback.setBackgroundResource(R.drawable.reader_back_btn_dark)
+        mBinding.vnback.imageTintList = ColorStateList.valueOf(NightTint.FG)
     }
 
     private fun dp(v: Int): Int = (resources.displayMetrics.density * v).toInt()
@@ -887,6 +956,8 @@ class ViewNovelActivity : Activity() {
         const val EXTRA_VOLUME = "volume"
         private const val PREF = "novel_reader"
         private const val KEY_FONT = "font_size"
+        /** 换章滑动过渡时长（ms） */
+        private const val SLIDE_MS = 250L
         /** 边界滑动接管手势的最小横向位移（dp） */
         private const val SWIPE_CLAIM_DP = 24
         /** 正文行距（dp）；分页与滚动必须用同一个值 */
