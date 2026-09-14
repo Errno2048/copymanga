@@ -29,7 +29,9 @@ object ReadingProgress {
         val volumeName: String,
         val chapterIndex: Int,
         val chapterName: String,
-        val page: Int
+        val page: Int,
+        /** 章内字符偏移：字号变化后页码会变，偏移不会，恢复位置以它为准 */
+        val offset: Int
     )
 
     private fun prefs(context: Context) =
@@ -77,7 +79,8 @@ object ReadingProgress {
         volumeName: String,
         chapterIndex: Int,
         chapterName: String,
-        page: Int
+        page: Int,
+        offset: Int
     ) {
         if (book.isBlank() || volumeId.isBlank()) return
         val obj = JsonObject().apply {
@@ -86,6 +89,7 @@ object ReadingProgress {
             addProperty("chapterIndex", chapterIndex)
             addProperty("chapterName", chapterName)
             addProperty("page", page)
+            addProperty("offset", offset)
             addProperty("at", System.currentTimeMillis())
         }
         prefs(context).edit().putString(KEY_NOVEL + book, obj.toString()).apply()
@@ -101,7 +105,8 @@ object ReadingProgress {
                 o.get("volumeName")?.asString.orEmpty(),
                 o.get("chapterIndex")?.asInt ?: 0,
                 o.get("chapterName")?.asString.orEmpty(),
-                o.get("page")?.asInt ?: 0
+                o.get("page")?.asInt ?: 0,
+                o.get("offset")?.asInt ?: 0
             )
         }.getOrNull()
     }

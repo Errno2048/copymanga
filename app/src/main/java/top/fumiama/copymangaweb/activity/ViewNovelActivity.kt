@@ -67,12 +67,22 @@ class ViewNovelActivity : Activity() {
     private var pagesKey = ""
     private var barsVisible = false
     private var pendingRestorePage = RESTORE_ANCHOR
+    /** >=0 时按章内字符偏移恢复（不随字号漂移） */
+    private var pendingRestoreOffset = -1
+    /** 重排期间抑制进度写入：notifyDataSetChanged 会先回调一次 onPageSelected(0) */
+    private var suppressProgressSave = false
     private var scrollMode = false
     private var pageOffsets: MutableList<Int> = mutableListOf()
-    /** 每页页首在滚动内容里的 y（含 vnscroll 顶部内边距），用于两种模式精确对齐 */
+    /**
+     * 每页对应的滚动偏移（scrollY）。取该值时页首行正好落在正文区顶部，
+     * 与翻页模式下页首行的位置一致（滚动内容自身已含 vnscroll 的顶部内边距）。
+     */
     private var pageTops: MutableList<Int> = mutableListOf()
-    /** 最近一次可用的章内字符偏移，布局未就绪时用它兜底 */
-    private var lastAnchor = 0
+    /**
+     * 当前阅读位置的章内字符偏移。只由「用户翻页/滚动」和「恢复进度」更新；
+     * 重排（换字号、安全区变化）不改写它，否则每换一次字号都会退到当时页首，逐次往回漂。
+     */
+    private var lastAnchor = -1
 
     private val night get() = NightTint.on(this)
 
@@ -123,7 +133,10 @@ class ViewNovelActivity : Activity() {
             object : ViewPager2.OnPageChangeCallback() {
                 override fun onPageSelected(position: Int) {
                     updateStatusLine()
-                    saveProgress()
+                    if (!suppressProgressSave) {
+                        lastAnchor = pageOffsets.getOrElse(position) { lastAnchor }
+                        saveProgress()
+                    }
                 }
             }
         )
@@ -175,7 +188,12 @@ class ViewNovelActivity : Activity() {
         mBinding.vnnext.setOnClickListener { stepChapter(1) }
         mBinding.vnmode.setOnClickListener { toggleMode() }
         mBinding.vnscroll.setOnScrollChangeListener { _, _, _, _, _ ->
-            if (scrollMode) updateStatusLine()
+            if (scrollMode) {
+                updateStatusLine()
+                if (!suppressProgressSave && scrollLayoutReady()) {
+                    lastAnchor = pageOffsets.getOrElse(scrollTopPage()) { lastAnchor }
+                }
+            }
         }
         // 只把手势喂给检测器、不消费事件：返回 true 会让 ScrollView 自己的滚动逻辑失效
         mBinding.vnscroll.setOnTouchListener { _, ev ->
@@ -290,17 +308,16 @@ class ViewNovelActivity : Activity() {
         mBinding.vnscrolltext.text = NovelStore.chapterText(fullText, ch)
     }
 
-    /** 当前读到哪：翻页模式取当前页首字符，滚动模式取视口顶端所在的页首字符 */
+    /** 按当前视图推算位置（不改写粘性锚点） */
     private fun currentAnchorOffset(): Int {
-        val off = if (scrollMode) scrollTopOffsetOrNull() else null
-        if (off != null) lastAnchor = off
-        return off ?: pageOffsets.getOrElse(mBinding.vnvp.currentItem) { lastAnchor }
+        if (scrollMode) scrollTopOffsetOrNull()?.let { return it }
+        return pageOffsets.getOrElse(mBinding.vnvp.currentItem) { 0 }
     }
 
     /** 滚动位置 -> 章内字符偏移；页表/布局还没跟上时返回 null */
     private fun scrollTopOffsetOrNull(): Int? {
         if (!scrollLayoutReady()) return null
-        return pageOffsets.getOrElse(scrollTopPage()) { lastAnchor }
+        return pageOffsets.getOrElse(scrollTopPage()) { 0 }
     }
 
     /**
@@ -323,7 +340,7 @@ class ViewNovelActivity : Activity() {
             mBinding.vnscroll.height).coerceAtLeast(0)
     }
 
-    /** 视口顶端算第几页：按页顶像素边界取最近的一页，比「行 -> 字符」反查精确 */
+    /** 正文区顶端算第几页：按页顶滚动偏移取最近的一页，比「行 -> 字符」反查精确 */
     private fun scrollTopPage(): Int {
         if (pageTops.isEmpty()) return 0
         val y = mBinding.vnscroll.scrollY
@@ -339,7 +356,7 @@ class ViewNovelActivity : Activity() {
         return idx
     }
 
-    /** 滚动到某页页首；布局未就绪时等下一帧重试 */
+    /** 滚动到某页页首（页首行落在正文区顶部，与翻页模式同高）；布局未就绪时重试 */
     private fun scrollToPage(index: Int) {
         val apply = object : Runnable {
             override fun run() {
@@ -471,8 +488,10 @@ class ViewNovelActivity : Activity() {
         }
         val sameVolume = saved != null && saved.volumeId == v.id
         val startChapter = if (sameVolume) saved!!.chapterIndex else 0
-        val startPage = if (sameVolume) saved!!.page else 0
-        loadVolume(v, startChapter, startPage)
+        // 优先按字符偏移恢复位置（页码会随字号变化），旧数据没有偏移才回退到页码
+        val startOffset = if (sameVolume && saved!!.offset > 0) saved!!.offset else -1
+        val startPage = if (sameVolume && startOffset < 0) saved!!.page else 0
+        loadVolume(v, startChapter, startPage, startOffset)
     }
 
     private fun fetchVolume(m: NovelBookMeta, volumeId: String): NovelVolumeMeta? =
@@ -481,12 +500,18 @@ class ViewNovelActivity : Activity() {
             NovelStore.save(this, m)
         }
 
-    private fun loadVolume(v: NovelVolumeMeta, startChapter: Int, startPage: Int) {
+    private fun loadVolume(
+        v: NovelVolumeMeta,
+        startChapter: Int,
+        startPage: Int,
+        startOffset: Int = -1
+    ) {
         val m = meta ?: return
         vol = v
         chapterIndex = startChapter.coerceIn(0, (v.chapters.size - 1).coerceAtLeast(0))
         pendingRestorePage = startPage
-        lastAnchor = 0
+        pendingRestoreOffset = startOffset
+        lastAnchor = if (startOffset >= 0) startOffset else -1
         val ch = v.chapters.getOrNull(chapterIndex)
         var text = ""
         if (ch != null && !ch.isImage) {
@@ -516,7 +541,8 @@ class ViewNovelActivity : Activity() {
         if (index !in v.chapters.indices) return
         chapterIndex = index
         pendingRestorePage = if (page == Int.MAX_VALUE) RESTORE_LAST else page
-        lastAnchor = 0
+        pendingRestoreOffset = -1
+        lastAnchor = -1
         pagesKey = ""
         rebuildPages()
         updateTitles()
@@ -542,20 +568,22 @@ class ViewNovelActivity : Activity() {
             Log.d("NovelReader", "rebuild skipped, same key=$key")
             return
         }
-        // 字号或安全区变化会重排分页，先记下当前读到的字符位置，重排后回到同一处文字
-        val anchor = currentAnchorOffset()
+        // 字号或安全区变化会重排分页，重排后回到同一处文字；优先用粘性锚点，
+        // 这样连续换字号不会因为「取所在页页首」而一步步往回漂
+        val anchor = if (lastAnchor >= 0) lastAnchor else currentAnchorOffset()
         val restore = pendingRestorePage
+        val restoreOffset = pendingRestoreOffset
         pendingRestorePage = RESTORE_ANCHOR
+        pendingRestoreOffset = -1
 
         val built = ArrayList<Page>()
         val offsets = ArrayList<Int>()
         val tops = ArrayList<Int>()
-        val padTop = mBinding.vnscroll.paddingTop + mBinding.vnscrolltext.paddingTop
         if (ch.isImage) {
             val local = NovelStore.imageFile(this, meta?.name.orEmpty(), v.name, ch)
             built.add(Page().also { it.image = if (local.exists()) local else ch.imageUrl })
             offsets.add(0)
-            tops.add(padTop)
+            tops.add(0)
         } else {
             val text = NovelStore.chapterText(fullText, ch)
             val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
@@ -580,7 +608,7 @@ class ViewNovelActivity : Activity() {
                 while (last > line && layout.getLineBottom(last) > top + h) last--
                 built.add(Page().also { it.layout = layout; it.topY = top })
                 offsets.add(layout.getLineStart(line))
-                tops.add(top + padTop)
+                tops.add(top)
                 line = last + 1
             }
             if (built.isEmpty()) built.add(Page().also { it.layout = layout })
@@ -590,9 +618,11 @@ class ViewNovelActivity : Activity() {
         pageOffsets = offsets
         pageTops = tops
         pagesKey = key
+        suppressProgressSave = true
         mBinding.vnvp.adapter?.notifyDataSetChanged()
         val last = (pages.size - 1).coerceAtLeast(0)
         val target = when {
+            restoreOffset >= 0 -> pageIndexForOffset(restoreOffset)
             restore == RESTORE_LAST -> last
             restore >= 0 -> restore.coerceIn(0, last)
             else -> pageIndexForOffset(anchor)
@@ -600,8 +630,9 @@ class ViewNovelActivity : Activity() {
         mBinding.vnvp.setCurrentItem(target, false)
         if (scrollMode) {
             loadScrollText()
-            scrollToPage(if (restore == RESTORE_ANCHOR) pageIndexForOffset(anchor) else target)
+            scrollToPage(target)
         }
+        suppressProgressSave = false
         updateStatusLine()
         saveProgress()
     }
@@ -633,18 +664,21 @@ class ViewNovelActivity : Activity() {
     private fun saveProgress() {
         val v = vol ?: return
         val ch = v.chapters.getOrNull(chapterIndex) ?: return
-        val page = if (scrollMode) {
+        // 进度以「章内字符偏移」为准：页码会随字号/分页尺寸变化，偏移不会
+        val page: Int
+        val offset: Int
+        if (scrollMode) {
             // 布局还没跟上文本时读不到真实位置，宁可不写也不要覆盖成第 0 页
             if (!scrollLayoutReady()) return
-            val idx = scrollTopPage()
-            lastAnchor = pageOffsets.getOrElse(idx) { lastAnchor }
-            idx
+            page = scrollTopPage()
+            offset = pageOffsets.getOrElse(page) { lastAnchor }
         } else {
-            lastAnchor = pageOffsets.getOrElse(mBinding.vnvp.currentItem) { lastAnchor }
-            mBinding.vnvp.currentItem
+            page = mBinding.vnvp.currentItem
+            offset = pageOffsets.getOrElse(page) { lastAnchor }
         }
+        val keep = if (lastAnchor >= 0) lastAnchor else offset
         ReadingProgress.saveNovel(
-            this, meta?.name.orEmpty(), v.id, v.name, chapterIndex, ch.name, page
+            this, meta?.name.orEmpty(), v.id, v.name, chapterIndex, ch.name, page, keep
         )
     }
 
