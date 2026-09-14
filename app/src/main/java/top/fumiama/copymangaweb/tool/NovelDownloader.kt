@@ -39,10 +39,15 @@ object NovelDownloader {
                     val vol = meta.details[info.id]
                         ?: NovelApi.volumeDetail(apiBase, meta.pathWord, info.id)
                             ?.also { meta.details[info.id] = it }
-                    if (vol != null && vol.txtAddr.isNotBlank()) {
-                        val dest = NovelStore.txtFile(ctx, meta.name, vol.name)
-                        if (dest.exists() || NovelApi.downloadBinary(vol.txtAddr, dest)) ok++
-                    }
+                    if (vol != null && vol.txtAddr.isNotBlank()) {
+                        val dest = NovelStore.txtFile(ctx, meta.name, vol.name)
+                        if (dest.exists() || NovelApi.downloadBinary(vol.txtAddr, dest)) ok++
+                        // 插图单独存放（正文 txt 里没有图片，必须一起下）
+                        vol.chapters.filter { it.isImage && it.imageUrl.isNotBlank() }.forEach { ch ->
+                            val img = NovelStore.imageFile(ctx, meta.name, vol.name, ch)
+                            if (!img.exists()) NovelApi.downloadBinary(ch.imageUrl, img)
+                        }
+                    }
                     NovelStore.save(ctx, meta)
                     toast(ctx, "小说下载中 ${i + 1}/$total")
                 }

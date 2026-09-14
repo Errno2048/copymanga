@@ -526,8 +526,15 @@ if (typeof (loaded) == "undefined") {
                             encoding: v.txt_encoding,
                             prev: v.prev == null ? null : String(v.prev),
                             next: v.next == null ? null : String(v.next),
+                            // content_type=1 正文（带行区间）、=2 插图（content 即原图链接）
                             chapters: (v.contents || []).map(function (c) {
-                                return { name: (c.name || "").trim(), start: c.start_lines, end: c.end_lines };
+                                return {
+                                    name: (c.name || "").trim(),
+                                    start: c.start_lines,
+                                    end: c.end_lines,
+                                    type: c.content_type || 1,
+                                    imageUrl: c.content || ""
+                                };
                             })
                         }
                     });

@@ -28,7 +28,8 @@ object ReadingProgress {
         val volumeId: String,
         val volumeName: String,
         val chapterIndex: Int,
-        val chapterName: String
+        val chapterName: String,
+        val page: Int
     )
 
     private fun prefs(context: Context) =
@@ -75,7 +76,8 @@ object ReadingProgress {
         volumeId: String,
         volumeName: String,
         chapterIndex: Int,
-        chapterName: String
+        chapterName: String,
+        page: Int
     ) {
         if (book.isBlank() || volumeId.isBlank()) return
         val obj = JsonObject().apply {
@@ -97,7 +99,8 @@ object ReadingProgress {
                 o.get("volumeId")?.asString.orEmpty(),
                 o.get("volumeName")?.asString.orEmpty(),
                 o.get("chapterIndex")?.asInt ?: 0,
-                o.get("chapterName")?.asString.orEmpty()
+                o.get("chapterName")?.asString.orEmpty(),
+                o.get("page")?.asInt ?: 0
             )
         }.getOrNull()
     }

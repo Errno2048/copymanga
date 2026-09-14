@@ -6,11 +6,19 @@ import com.google.gson.GsonBuilder
 import java.io.File
 import java.nio.charset.Charset
 
-/** 一章：在整卷 txt 中的 0 基行区间 [start, end)，end 不含下一章标题。 */
+/**
+ * 一个目录条目（站点 contents 的一项）：
+ * - type = 1 正文：在整卷 txt 中的 0 基行区间 [start, end)，end 不含下一章标题；
+ * - type = 2 插图：正文里的插画，imageUrl 为原图链接（txt 里没有它）。
+ */
 class NovelChapterMeta {
     var name: String = ""
     var start: Int = 0
     var end: Int = 0
+    var type: Int = 1
+    var imageUrl: String = ""
+
+    val isImage: Boolean get() = type == 2
 }
 
 /** 一卷：一个整篇 txt + 章节行区间。 */
@@ -65,6 +73,13 @@ object NovelStore {
     private fun metaFile(ctx: Context, name: String): File = File(dir(ctx, name), META_FILE)
     fun txtFile(ctx: Context, name: String, volumeName: String): File =
         File(dir(ctx, name), sanitize(volumeName) + ".txt")
+
+    /** 插图的本地文件：<书名>/<卷名>__<条目名>.<ext> */
+    fun imageFile(ctx: Context, name: String, volumeName: String, chapter: NovelChapterMeta): File {
+        val ext = chapter.imageUrl.substringAfterLast('.', "jpg")
+            .substringBefore('?').take(4).ifBlank { "jpg" }
+        return File(dir(ctx, name), sanitize("${volumeName}__${chapter.name}") + "." + ext)
+    }
 
     fun sanitize(s: String): String =
         s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { "volume" }

@@ -90,6 +90,8 @@ object NovelApi {
                         c.name = o.get("name")?.asString?.trim().orEmpty()
                         c.start = o.get("start_lines")?.asInt ?: 0
                         c.end = o.get("end_lines")?.asInt ?: 0
+                        c.type = o.get("content_type")?.asInt ?: 1
+                        c.imageUrl = o.get("content")?.takeIf { !it.isJsonNull }?.asString.orEmpty()
                     })
                 }
             }

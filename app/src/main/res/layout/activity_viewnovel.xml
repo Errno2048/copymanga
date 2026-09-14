@@ -1,99 +1,181 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools">
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/vnroot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FCFCFF">
 
-    <androidx.constraintlayout.widget.ConstraintLayout
-        android:id="@+id/vnroot"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="#FCFCFF">
+    <!-- 正文分页（左右滑动，也可左右点击翻页） -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/vnvp"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-        <include
-            android:id="@+id/vntitle"
-            layout="@layout/widget_titlebar"
+    <!-- 常态信息层：不拦截触摸，点击穿透给分页控件 -->
+    <TextView
+        android:id="@+id/vntopchapter"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="20dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="20dp"
+        android:alpha="0.55"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:text="第一章 章节标题" />
+
+    <LinearLayout
+        android:id="@+id/vnstatusline"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="20dp"
+        android:layout_marginEnd="20dp"
+        android:layout_marginBottom="10dp"
+        android:orientation="horizontal"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <TextView
+            android:id="@+id/vntimeleft"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent" />
+            android:layout_weight="1"
+            android:alpha="0.55"
+            android:textSize="12sp"
+            tools:text="85%  21:30" />
 
-        <ScrollView
-            android:id="@+id/vnscroll"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:scrollbars="none"
-            app:layout_constraintBottom_toTopOf="@+id/vnbar"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/vntitle">
+        <TextView
+            android:id="@+id/vnposright"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:alpha="0.55"
+            android:textSize="12sp"
+            tools:text="30 / 100" />
+    </LinearLayout>
 
-            <TextView
-                android:id="@+id/vntext"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingStart="20dp"
-                android:paddingTop="16dp"
-                android:paddingEnd="20dp"
-                android:paddingBottom="32dp"
-                android:lineSpacingExtra="6dp"
-                android:textSize="18sp"
-                tools:text="正文" />
-        </ScrollView>
+    <!-- 顶部栏（点击正文后悬浮显示） -->
+    <LinearLayout
+        android:id="@+id/vntopbar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="#FCFCFF"
+        android:elevation="6dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
 
-        <LinearLayout
-            android:id="@+id/vnbar"
+        <Button
+            android:id="@+id/vnback"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="56dp"
+            android:text="@string/reader_back" />
+
+        <TextView
+            android:id="@+id/vntopbartitle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="15sp"
+            tools:text="章节标题" />
+    </LinearLayout>
+
+    <!-- 底部栏（点击正文后悬浮显示） -->
+    <LinearLayout
+        android:id="@+id/vnbottombar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="#FCFCFF"
+        android:elevation="6dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <Button
+            android:id="@+id/vntoc"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/reader_toc" />
+
+        <Button
+            android:id="@+id/vnfontdec"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/font_dec" />
+
+        <Button
+            android:id="@+id/vnfontinc"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/font_inc" />
+
+        <Button
+            android:id="@+id/vnprev"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/prev_chapter" />
+
+        <Button
+            android:id="@+id/vnnext"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/next_chapter" />
+    </LinearLayout>
+
+    <!-- 目录浮层：左侧目录条目，右侧黑色半透明遮罩，点遮罩返回阅读页 -->
+    <LinearLayout
+        android:id="@+id/vntocoverlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ListView
+            android:id="@+id/vntoclist"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.68"
             android:background="#FCFCFF"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="8dp"
-            android:paddingTop="4dp"
-            android:paddingEnd="8dp"
-            android:paddingBottom="4dp"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent">
+            android:divider="#22000000"
+            android:dividerHeight="1dp" />
 
-            <Button
-                android:id="@+id/vnfontdec"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minWidth="48dp"
-                android:text="@string/font_dec" />
+        <View
+            android:id="@+id/vntocmask"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.32"
+            android:background="#99000000" />
+    </LinearLayout>
 
-            <Button
-                android:id="@+id/vnprev"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_weight="1"
-                android:text="@string/prev_chapter" />
-
-            <TextView
-                android:id="@+id/vnpos"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_marginEnd="8dp"
-                android:text="@string/zero_per_zero" />
-
-            <Button
-                android:id="@+id/vnnext"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="4dp"
-                android:layout_weight="1"
-                android:text="@string/next_chapter" />
-
-            <Button
-                android:id="@+id/vnfontinc"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minWidth="48dp"
-                android:text="@string/font_inc" />
-        </LinearLayout>
-
-    </androidx.constraintlayout.widget.ConstraintLayout>
-</layout>
+</androidx.constraintlayout.widget.ConstraintLayout>
