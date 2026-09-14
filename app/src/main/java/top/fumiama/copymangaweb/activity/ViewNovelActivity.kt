@@ -18,6 +18,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import kotlin.math.abs
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -71,6 +72,10 @@ class ViewNovelActivity : Activity() {
     private var pendingRestoreOffset = -1
     /** 重排期间抑制进度写入：notifyDataSetChanged 会先回调一次 onPageSelected(0) */
     private var suppressProgressSave = false
+    // 边界滑动换章的按下起点
+    private var swipeDownX = 0f
+    private var swipeDownY = 0f
+    private var swipeDownItem = 0
     private var scrollMode = false
     private var pageOffsets: MutableList<Int> = mutableListOf()
     /**
@@ -86,10 +91,15 @@ class ViewNovelActivity : Activity() {
 
     private val night get() = NightTint.on(this)
 
-    /** 正文点击：分页模式左/中/右分别是 上一页/显隐栏/下一页；滚动模式任意点击显隐栏。 */
+    /**
+     * 翻页模式下的点击手势：左/中/右 = 上一页/显隐栏/下一页；滚动模式任意点击显隐栏。
+     * （边界处的左右滑动换章由 installBoundarySwipe 在 ViewPager2 层面观察，
+     *   这里收不到整段滑动——ViewPager2 一旦开始拖动就会拦截事件流。）
+     */
     private val tapDetector by lazy {
         GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
+
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (scrollMode) {
                     toggleBars()
@@ -128,7 +138,9 @@ class ViewNovelActivity : Activity() {
         applyNight()
         wireUi()
         mBinding.vnvp.adapter = PageAdapter()
+        installBoundarySwipe()
         mBinding.vnvp.offscreenPageLimit = 1
+        // 翻页模式左右滑动用于换章（翻页靠点击左右区域）；滚动模式滑动仍是滚动
         mBinding.vnvp.registerOnPageChangeCallback(
             object : ViewPager2.OnPageChangeCallback() {
                 override fun onPageSelected(position: Int) {
@@ -271,14 +283,23 @@ class ViewNovelActivity : Activity() {
     /** 切换阅读方式：翻页<->滚动 时按当前阅读位置对齐。 */
     private fun applyMode() {
         if (scrollMode) {
-            // 翻页 -> 滚动：直接对齐到当前页首（同一张页顶表，像素级一致）
+            // 翻页 -> 滚动：先把正文与滚动位置都摆好再让它可见。
+            // 反过来的话，ScrollView 会带着上一次的 scrollY/旧正文先渲染一帧，
+            // 看起来就是「先闪一下上次滚动到的画面，再跳到对齐位置」。
+            // 注意：这时 TextView 的布局还没跟上新设置的文本，直接 scrollTo 只是白做，
+            // 显示出来的一帧仍是上一次滚动模式停留的位置——也就是会「闪一下」。
+            // 所以先让滚动视图保持不可见（INVISIBLE 仍参与布局），滚到位后再换过来。
             val page = mBinding.vnvp.currentItem
-            mBinding.vnvp.visibility = View.GONE
-            mBinding.vnscroll.visibility = View.VISIBLE
-            mBinding.vnfadetop.visibility = View.VISIBLE
-            mBinding.vnfadebottom.visibility = View.VISIBLE
+            mBinding.vnscroll.visibility = View.INVISIBLE
             loadScrollText()
-            scrollToPage(page)
+            scrollToPage(page) {
+                if (!scrollMode) return@scrollToPage   // 期间又切回翻页了，别再显示
+                mBinding.vnvp.visibility = View.GONE
+                mBinding.vnfadetop.visibility = View.VISIBLE
+                mBinding.vnfadebottom.visibility = View.VISIBLE
+                mBinding.vnscroll.visibility = View.VISIBLE
+                updateStatusLine()
+            }
         } else {
             // 滚动 -> 翻页：对齐到视口顶端所在的那一页
             val page = scrollTopPage()
@@ -293,6 +314,59 @@ class ViewNovelActivity : Activity() {
         updateModeButton()
         updateStatusLine()
         saveProgress()
+    }
+
+    /**
+     * 翻页模式下，已经在本章第一页/最后一页还继续左右滑动时，切换到上一章/下一章；
+     * 滚动模式不装这套逻辑（保持现状）。
+     */
+    private fun installBoundarySwipe() {
+        val rv = mBinding.vnvp.getChildAt(0) as? RecyclerView ?: return
+        rv.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
+            private var claimed = false
+
+            override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        swipeDownX = e.x
+                        swipeDownY = e.y
+                        swipeDownItem = mBinding.vnvp.currentItem
+                        claimed = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        // 只在「已经在本章首/末页、还继续往外滑」时接管这段手势。
+                        // 平时返回 false，左右滑动翻页仍由 ViewPager2 正常处理。
+                        if (!claimed && !scrollMode) {
+                            val dx = e.x - swipeDownX
+                            val dy = e.y - swipeDownY
+                            val out = when {
+                                dx < 0 -> swipeDownItem >= pages.size - 1
+                                dx > 0 -> swipeDownItem <= 0
+                                else -> false
+                            }
+                            if (out && abs(dx) > abs(dy) && abs(dx) > dp(SWIPE_CLAIM_DP)) {
+                                claimed = true
+                                return true   // 边界上没有可翻的页，接管不影响翻页
+                            }
+                        }
+                    }
+                }
+                return claimed
+            }
+
+            override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) {
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_UP -> {
+                        val dx = e.x - swipeDownX
+                        if (claimed && abs(dx) > mBinding.vnvp.width * 0.15f) {
+                            stepChapter(if (dx < 0) 1 else -1)
+                        }
+                        claimed = false
+                    }
+                    MotionEvent.ACTION_CANCEL -> claimed = false
+                }
+            }
+        })
     }
 
     private fun updateModeButton() {
@@ -356,16 +430,26 @@ class ViewNovelActivity : Activity() {
         return idx
     }
 
-    /** 滚动到某页页首（页首行落在正文区顶部，与翻页模式同高）；布局未就绪时重试 */
-    private fun scrollToPage(index: Int) {
+    /**
+     * 滚动到某页页首（页首行落在正文区顶部，与翻页模式同高）。
+     * 布局未就绪时每帧重试（最多约 0.6s），滚动完成或放弃后回调 onReady。
+     */
+    private fun scrollToPage(index: Int, onReady: (() -> Unit)? = null) {
+        var attempts = 0
         val apply = object : Runnable {
             override fun run() {
-                if (!scrollLayoutReady()) {
-                    if (mBinding.vnscroll.isAttachedToWindow) mBinding.vnscroll.postDelayed(this, 16)
+                if (!scrollLayoutReady() && attempts++ < 40) {
+                    if (mBinding.vnscroll.isAttachedToWindow) {
+                        mBinding.vnscroll.postDelayed(this, 16)
+                        return
+                    }
+                    onReady?.invoke()
                     return
                 }
-                val y = pageTops.getOrElse(index) { 0 }
-                mBinding.vnscroll.scrollTo(0, y)
+                if (scrollLayoutReady()) {
+                    mBinding.vnscroll.scrollTo(0, pageTops.getOrElse(index) { 0 })
+                }
+                onReady?.invoke()
             }
         }
         mBinding.vnscroll.post(apply)
@@ -630,6 +714,8 @@ class ViewNovelActivity : Activity() {
         mBinding.vnvp.setCurrentItem(target, false)
         if (scrollMode) {
             loadScrollText()
+            // 先按新分页把滚动位置摆好，避免旧位置先渲染一帧
+            mBinding.vnscroll.scrollTo(0, pageTops.getOrElse(target) { 0 })
             scrollToPage(target)
         }
         suppressProgressSave = false
@@ -801,6 +887,8 @@ class ViewNovelActivity : Activity() {
         const val EXTRA_VOLUME = "volume"
         private const val PREF = "novel_reader"
         private const val KEY_FONT = "font_size"
+        /** 边界滑动接管手势的最小横向位移（dp） */
+        private const val SWIPE_CLAIM_DP = 24
         /** 正文行距（dp）；分页与滚动必须用同一个值 */
         private const val LINE_SPACING_DP = 6f
         private const val MIN_FONT = 12f
