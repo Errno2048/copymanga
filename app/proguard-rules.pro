@@ -46,6 +46,9 @@
 # Application classes that will be serialized/deserialized over Gson
 -keep public class top.fumiama.copymangaweb.data.* { *; }
 
+# 小说本地元数据同样由 Gson 反射读写，release 混淆下必须保留字段名
+-keep public class top.fumiama.copymangaweb.tool.Novel* { *; }
+
 # Prevent proguard from stripping interface information from TypeAdapter, TypeAdapterFactory,
 # JsonSerializer, JsonDeserializer instances (so they can be used in @JsonAdapter)
 -keep class * extends com.google.gson.TypeAdapter
