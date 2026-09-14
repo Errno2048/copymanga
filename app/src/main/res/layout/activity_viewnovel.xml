@@ -8,7 +8,7 @@
     android:layout_height="match_parent"
     android:background="#FCFCFF">
 
-    <!-- 正文分页（左右滑动，也可左右点击翻页） -->
+    <!-- 翻页模式：正文分页（左右滑动，也可左右点击翻页） -->
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/vnvp"
         android:layout_width="0dp"
@@ -18,7 +18,55 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- 常态信息层：不拦截触摸，点击穿透给分页控件 -->
+    <!-- 滚动模式：整章连续文本 -->
+    <ScrollView
+        android:id="@+id/vnscroll"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:paddingStart="20dp"
+        android:paddingTop="44dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="40dp"
+        android:scrollbars="none"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/vnscrolltext"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:breakStrategy="simple"
+            android:hyphenationFrequency="none"
+            android:includeFontPadding="false"
+            android:lineSpacingExtra="6dp"
+            tools:text="正文" />
+    </ScrollView>
+
+    <!-- 滚动模式下文字与上下信息之间做渐变过渡，避免控件压住文字 -->
+    <View
+        android:id="@+id/vnfadetop"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:background="@drawable/fade_top_light"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <View
+        android:id="@+id/vnfadebottom"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:background="@drawable/fade_bottom_light"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- 常态信息层：不拦截触摸，点击穿透给正文 -->
     <TextView
         android:id="@+id/vntopchapter"
         android:layout_width="0dp"
@@ -74,6 +122,10 @@
         android:elevation="6dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingTop="4dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="4dp"
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -83,21 +135,26 @@
             android:id="@+id/vnback"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="56dp"
-            android:text="@string/reader_back" />
+            android:background="@drawable/reader_btn"
+            android:minWidth="52dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="@string/reader_back"
+            android:textSize="26sp" />
 
         <TextView
             android:id="@+id/vntopbartitle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
             android:layout_weight="1"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textSize="15sp"
+            android:textSize="16sp"
             tools:text="章节标题" />
     </LinearLayout>
 
-    <!-- 底部栏（点击正文后悬浮显示） -->
+    <!-- 底部栏：目录 / A- / 上一章 / 下一章 / A+ / 阅读方式（对称，中间两个最宽） -->
     <LinearLayout
         android:id="@+id/vnbottombar"
         android:layout_width="0dp"
@@ -106,8 +163,10 @@
         android:elevation="6dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:paddingStart="6dp"
+        android:paddingTop="5dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="5dp"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
@@ -117,36 +176,85 @@
             android:id="@+id/vntoc"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
             android:layout_weight="1"
-            android:text="@string/reader_toc" />
+            android:background="@drawable/reader_btn"
+            android:minWidth="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/reader_toc"
+            android:textSize="13sp" />
 
         <Button
             android:id="@+id/vnfontdec"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/font_dec" />
-
-        <Button
-            android:id="@+id/vnfontinc"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/font_inc" />
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
+            android:layout_weight="0.62"
+            android:background="@drawable/reader_btn"
+            android:minWidth="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/font_dec"
+            android:textSize="13sp" />
 
         <Button
             android:id="@+id/vnprev"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/prev_chapter" />
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
+            android:layout_weight="1.45"
+            android:background="@drawable/reader_btn"
+            android:minWidth="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/prev_chapter"
+            android:textSize="13sp" />
 
         <Button
             android:id="@+id/vnnext"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
+            android:layout_weight="1.45"
+            android:background="@drawable/reader_btn"
+            android:minWidth="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/next_chapter"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/vnfontinc"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
+            android:layout_weight="0.62"
+            android:background="@drawable/reader_btn"
+            android:minWidth="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/font_inc"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/vnmode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
             android:layout_weight="1"
-            android:text="@string/next_chapter" />
+            android:background="@drawable/reader_btn"
+            android:minWidth="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/reader_mode_scroll"
+            android:textSize="13sp" />
     </LinearLayout>
 
     <!-- 目录浮层：左侧目录条目，右侧黑色半透明遮罩，点遮罩返回阅读页 -->

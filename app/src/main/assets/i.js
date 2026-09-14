@@ -610,6 +610,17 @@ if (typeof (loaded) == "undefined") {
             router.beforeEach(function (to, from, next) {
                 try {
                     var fp = (to && (to.fullPath || to.path)) || "";
+                    // 小说内容页：详情页的「續看」等按钮走的是路由而不是卷列表点击，
+                    // 这里一并拦下，交给内嵌阅读器
+                    var mv = /novelContent\/([^\/]+)\/([^\/?#]+)/.exec(fp);
+                    if (mv) {
+                        var nb = self.novelBook;
+                        if (nb && nb.pathWord === mv[1]) {
+                            self.openNovelVolume(nb, mv[2]);
+                            next(false);
+                            return;
+                        }
+                    }
                     var m = /comicContent\/([^\/]+)\/([^\/?#]+)/.exec(fp);
                     if (m) {
                         var url = "https://cm.local/comicContent/" + m[1] + "/" + m[2];
