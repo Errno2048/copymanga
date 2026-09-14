@@ -18,6 +18,8 @@
     <string name="prev_chapter">上一章</string>
     <string name="next_chapter">下一章</string>
     <string name="reader_invert_off">反色·关</string>
+    <string name="invert_style_value">反色方式：只反转亮度（保持色相）</string>
+    <string name="invert_style_rgb">反色方式：直接反色（颜色会变补色）</string>
     <string name="reader_toc">目录</string>
     <string name="reader_mode_scroll">滚动</string>
     <string name="reader_mode_paged">翻页</string>

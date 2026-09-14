@@ -53,10 +53,18 @@ class JS {
         val ctx = wm?.get() ?: return
         ctx.getSharedPreferences(NIGHT_PREF, Context.MODE_PRIVATE).edit().putString(INVERT_KEY, mode).apply()
     }
+    // 反色方式（value / rgb）：回传给原生阅读器
+    @JavascriptInterface
+    fun setInvertStyle(style: String) {
+        val ctx = wm?.get() ?: return
+        ctx.getSharedPreferences(NIGHT_PREF, Context.MODE_PRIVATE).edit().putString(INVERT_STYLE_KEY, style).apply()
+    }
+
     companion object {
         const val NIGHT_PREF = "night"
         const val NIGHT_KEY = "on"
         const val INVERT_KEY = "invert_mode"
+        const val INVERT_STYLE_KEY = "invert_style"
         const val INVERT_GAIN_KEY = "invert_gain"
         const val INVERT_BLACK_KEY = "invert_black"
     }

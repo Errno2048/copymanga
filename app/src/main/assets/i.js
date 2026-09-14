@@ -17,6 +17,8 @@ if (typeof (loaded) == "undefined") {
         novelStyleKey: "novelSteing",
         // 黑白漫画反色开关键。
         invertKey: "cm_invert",
+        // 反色方式：value = 只反转亮度（保持色相）、rgb = 按通道直接反色。
+        invertStyleKey: "cm_invert_style",
         tickMs: 800
     };
     var NIGHT_CSS = ""
@@ -221,6 +223,19 @@ if (typeof (loaded) == "undefined") {
             try { localStorage.setItem(settings.invertKey, next); } catch (e) {}
             this.applyToggles();
         },
+        invertStyle: function () {
+            try {
+                return localStorage.getItem(settings.invertStyleKey) === "rgb" ? "rgb" : "value";
+            } catch (e) { return "value"; }
+        },
+        invertStyleLabel: function (style) {
+            return style === "rgb" ? "直接反色" : "只反转亮度（保色相）";
+        },
+        cycleInvertStyle: function () {
+            var next = this.invertStyle() === "rgb" ? "value" : "rgb";
+            try { localStorage.setItem(settings.invertStyleKey, next); } catch (e) {}
+            this.applyToggles();
+        },
         // 同步设置页两行的外观，并把反色模式回传给原生端。
         applyToggles: function () {
             var nightSw = document.getElementById("cm-night-switch");
@@ -232,6 +247,13 @@ if (typeof (loaded) == "undefined") {
                 this._lastInvert = mode;
                 try { if (typeof GM.setInvertMode === "function") GM.setInvertMode(mode); } catch (e) {}
             }
+            var style = this.invertStyle();
+            var sval = document.getElementById("cm-invert-style-value");
+            if (sval) sval.textContent = this.invertStyleLabel(style);
+            if (this._lastInvertStyle !== style) {
+                this._lastInvertStyle = style;
+                try { if (typeof GM.setInvertStyle === "function") GM.setInvertStyle(style); } catch (e) {}
+            }
         },
         // 设置页注入开关：夜间模式（开关）、黑白漫画反色（三态循环）。幂等，可重复调用。
         installSettingRows: function () {
@@ -240,7 +262,8 @@ if (typeof (loaded) == "undefined") {
             var self = this;
             var rows = [
                 { id: "cm-night-cell", kind: "switch", label: "夜间模式" },
-                { id: "cm-invert-cell", kind: "cycle", label: "黑白漫画反色" }
+                { id: "cm-invert-cell", kind: "cycle", label: "黑白漫画反色", valueId: "cm-invert-value" },
+                { id: "cm-invert-style-cell", kind: "cycle", label: "反色方式", valueId: "cm-invert-style-value" }
             ];
             for (var i = 0; i < rows.length; i++) {
                 if (document.getElementById(rows[i].id)) continue;
@@ -249,7 +272,7 @@ if (typeof (loaded) == "undefined") {
                 wrap.className = "van-cell-group";
                 var right = row.kind === "switch"
                     ? '<i id="cm-night-switch" class="cm-switch"></i>'
-                    : '<span id="cm-invert-value" style="color:#d8d8d8"></span>';
+                    : '<span id="' + row.valueId + '" style="color:#d8d8d8"></span>';
                 wrap.innerHTML = '<div class="van-cell" id="' + row.id + '">'
                     + '<div class="van-cell__title"><span>' + row.label + '</span></div>'
                     + '<div class="van-cell__value">' + right + '</div></div>';
@@ -257,7 +280,9 @@ if (typeof (loaded) == "undefined") {
                     wrap.addEventListener("click", function (e) {
                         e.stopPropagation();
                         e.preventDefault();
-                        if (r.kind === "switch") self.setNight(!self.nightOn()); else self.cycleInvert();
+                        if (r.kind === "switch") self.setNight(!self.nightOn());
+                        else if (r.id === "cm-invert-style-cell") self.cycleInvertStyle();
+                        else self.cycleInvert();
                     });
                 })(row);
                 groups[0].parentNode.insertBefore(wrap, groups[0].nextSibling);

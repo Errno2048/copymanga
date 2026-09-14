@@ -390,6 +390,10 @@ class ViewMangaActivity : ToolsBoxActivity() {
         mBinding.oneinfo.btprevchapter.setOnClickListener { gotoAdjacentChapter(r2l) }
         mBinding.oneinfo.btnextchapter.setOnClickListener { gotoAdjacentChapter(!r2l) }
         mBinding.oneinfo.btinvert.setOnClickListener { cycleInvertMode() }
+        mBinding.oneinfo.btinvert.setOnLongClickListener {
+            toggleInvertStyle()
+            true
+        }
         applyChapterNavOrder()
         updateInvertButton()
         updateChapterNavState()
@@ -426,6 +430,26 @@ class ViewMangaActivity : ToolsBoxActivity() {
         lutCache = null
         lutCacheKey = ""
         updateInvertButton()
+        refreshPages()
+    }
+
+    /** 长按反色按钮切换反色方式（只反转亮度 / 直接反色），便于当场对比。 */
+    private fun toggleInvertStyle() {
+        val next = if (invertStyle == InvertTone.STYLE_RGB) InvertTone.STYLE_VALUE
+            else InvertTone.STYLE_RGB
+        invertStyle = next
+        mBinding.wcollector.post {
+            runCatching {
+                mBinding.wcollector.evaluateJavascript(
+                    "localStorage.setItem('cm_invert_style','$next')", null
+                )
+            }
+        }
+        Toast.makeText(
+            this,
+            if (next == InvertTone.STYLE_VALUE) R.string.invert_style_value else R.string.invert_style_rgb,
+            Toast.LENGTH_SHORT
+        ).show()
         refreshPages()
     }
 
@@ -481,6 +505,15 @@ class ViewMangaActivity : ToolsBoxActivity() {
     private val invertMode: String
         get() = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).getString(JS.INVERT_KEY, "off") ?: "off"
 
+    /** 反色方式：value（只反转亮度、保色相）/ rgb（按通道反色）。 */
+    private var invertStyle: String
+        get() = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE)
+            .getString(JS.INVERT_STYLE_KEY, InvertTone.STYLE_VALUE) ?: InvertTone.STYLE_VALUE
+        set(value) {
+            getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).edit()
+                .putString(JS.INVERT_STYLE_KEY, value).apply()
+        }
+
     /** 反色线条补偿增益（1.0 = 不补偿）。 */
     private var invertGain: Float
         get() = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).getFloat(JS.INVERT_GAIN_KEY, 1f)
@@ -499,6 +532,8 @@ class ViewMangaActivity : ToolsBoxActivity() {
 
     private var lutCache: IntArray? = null
     private var lutCacheKey = ""
+    private var scaleCache: FloatArray? = null
+    private var scaleCacheKey = ""
 
     private fun toneLut(): IntArray {
         val g = invertGain
@@ -508,6 +543,18 @@ class ViewMangaActivity : ToolsBoxActivity() {
         return InvertTone.buildLut(b, g).also {
             lutCache = it
             lutCacheKey = key
+        }
+    }
+
+    /** 亮度反色用的缩放系数表（与 LUT 同样按参数缓存）。 */
+    private fun toneScale(): FloatArray {
+        val g = invertGain
+        val b = invertBlack
+        val key = "$g/$b"
+        scaleCache?.let { if (scaleCacheKey == key) return it }
+        return InvertTone.buildValueScale(b, g).also {
+            scaleCache = it
+            scaleCacheKey = key
         }
     }
 
@@ -551,14 +598,23 @@ class ViewMangaActivity : ToolsBoxActivity() {
             view.setImageResource(R.drawable.ic_dl)
             return
         }
-        if (shouldInvert(bmp)) view.setImageBitmap(InvertTone.apply(bmp, toneLut()))
-        else view.setImageBitmap(bmp)
+        if (shouldInvert(bmp)) {
+            // 默认只反转亮度：黑白页结果与直接反色逐像素相同，彩色页则保住色相
+            view.setImageBitmap(
+                if (invertStyle == InvertTone.STYLE_RGB) InvertTone.apply(bmp, toneLut())
+                else InvertTone.applyValue(bmp, toneScale())
+            )
+        } else {
+            view.setImageBitmap(bmp)
+        }
     }
 
     /** 补偿参数变化后重绘当前页面。 */
     private fun refreshPages() {
         lutCache = null
         lutCacheKey = ""
+        scaleCache = null
+        scaleCacheKey = ""
         when (readerMode) {
             ReaderMode.SINGLE_PAGE -> runCatching { loadOneImg() }
             ReaderMode.PAGED -> if (count > 0) pagedAdapter?.notifyItemRangeChanged(0, count)
