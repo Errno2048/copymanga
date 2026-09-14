@@ -4,10 +4,21 @@
     <string name="web_home_www">https://www.copy3000.com</string>
     <string name="web_comic_detail_pc">https://www.copy3000.com/comic</string>
 
+    <!-- 镜像线路：站点域名会轮换，某条线路失效时自动切换 -->
+    <string-array name="web_mirrors">
+        <item>https://www.copy3000.com</item>
+        <item>https://www.copy4000.com</item>
+        <item>https://copy-manga.com</item>
+    </string-array>
+
     <string name="pc_ua">Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36 Edg/86.0.622.38</string>
 
     <string name="blocked_ad">已屏蔽其他网站页面</string>
     <string name="loading">加载中…</string>
+    <string name="prev_chapter">上一章</string>
+    <string name="next_chapter">下一章</string>
+    <string name="line_tone">反色线条补偿</string>
+    <string name="line_tone_black">背景黑度</string>
     <string name="vol_turn_off">音量翻页关</string>
     <string name="vol_turn_on">音量翻页开</string>
     <string name="horizontal">横向</string>

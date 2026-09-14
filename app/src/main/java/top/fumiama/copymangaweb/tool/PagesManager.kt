@@ -1,6 +1,5 @@
 package top.fumiama.copymangaweb.tool
 
-import android.content.Intent
 import android.widget.Toast
 import top.fumiama.copymangaweb.activity.MainActivity.Companion.wm
 import top.fumiama.copymangaweb.activity.ViewMangaActivity
@@ -37,11 +36,9 @@ class PagesManager(w: WeakReference<ViewMangaActivity>) {
                         return
                     }
                     if (if(goNext)isEndR else isEndL) {
-                        setChapterStartPage(goNext)
-                        wm?.get()?.mBinding?.w?.apply { post {
-                            loadUrl("javascript:invoke.clickClass(\"comicControlBottomTopClick\",${if(goNext)1 else 0});")
-                        } }
-                        v?.finish()
+                        // 直接切换到相邻章节：旧实现依赖点击可见 WebView 里站点的
+                        // comicControlBottomTopClick 按钮，但详情页直连阅读器后那个页面已不在。
+                        v?.gotoAdjacentChapter(goNext)
                     } else doubleTapToast(goNext)
                 }
             }
@@ -49,37 +46,15 @@ class PagesManager(w: WeakReference<ViewMangaActivity>) {
     }
 
     private fun switchZipChapter(goNext: Boolean) {
-        val chapters = ViewMangaActivity.zipList.orEmpty()
-        val newPosition = ViewMangaActivity.zipPosition + if (goNext) 1 else -1
-        val chapter = chapters.getOrNull(newPosition)
-        if (chapter == null) {
-            showReachedEnd()
-            return
-        }
         if (!(if (goNext) isEndR else isEndL)) {
             doubleTapToast(goNext)
             return
         }
-
-        val reader = v ?: return
-        setChapterStartPage(goNext)
-        ViewMangaActivity.zipPosition = newPosition
-        ViewMangaActivity.titleText = chapter.nameWithoutExtension
-        ViewMangaActivity.zipFile = chapter
-        reader.startActivity(Intent(reader, ViewMangaActivity::class.java))
-        reader.finish()
+        v?.gotoAdjacentChapter(goNext)
     }
 
     private fun showReachedEnd() {
         Toast.makeText(v?.applicationContext, "已经到头了~", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun setChapterStartPage(goNext: Boolean) {
-        ViewMangaActivity.pn = if (goNext) {
-            ViewMangaActivity.FIRST_PAGE
-        } else {
-            ViewMangaActivity.LAST_PAGE
-        }
     }
 
     fun manageInfo(){

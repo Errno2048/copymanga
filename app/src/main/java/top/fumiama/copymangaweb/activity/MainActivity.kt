@@ -2,11 +2,15 @@ package top.fumiama.copymangaweb.activity
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.view.View
+import android.view.WindowInsetsController
 import android.webkit.ValueCallback
 import android.webkit.WebView
 import android.window.OnBackInvokedCallback
@@ -26,8 +30,9 @@ import top.fumiama.copymangaweb.tool.InsetsTools
 import top.fumiama.copymangaweb.tool.MangaDlTools.Companion.wmdlt
 import top.fumiama.copymangaweb.tool.SetDraggable
 import top.fumiama.copymangaweb.tool.Updater
-import top.fumiama.copymangaweb.web.JS
 import top.fumiama.copymangaweb.web.JSHidden
+import top.fumiama.copymangaweb.web.JS
+import top.fumiama.copymangaweb.web.Mirrors
 import top.fumiama.copymangaweb.web.WebChromeClient
 import java.lang.ref.WeakReference
 
@@ -43,6 +48,9 @@ class MainActivity: ToolsBoxActivity() {
     @SuppressLint("JavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        origStatusBarColor = window.statusBarColor
+        origNavigationBarColor = window.navigationBarColor
+        origWindowBackground = window.decorView.background
         mBinding = ActivityMainBinding.inflate(layoutInflater)
         mBinding.mainViewModel = mViewModel
         mBinding.lifecycleOwner = this
@@ -65,11 +73,11 @@ class MainActivity: ToolsBoxActivity() {
             }
 
             WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+            Mirrors.init(this@MainActivity)
             mBinding.w.apply { post {
                 setWebViewClient("i.js")
                 webChromeClient = WebChromeClient()
                 loadJSInterface(JS())
-                loadUrl(getString(R.string.web_home))
             } }
 
             mBinding.wh.apply { post {
@@ -78,6 +86,12 @@ class MainActivity: ToolsBoxActivity() {
                 setWebViewClient("h.js")
                 loadJSInterface(JSHidden())
             } }
+
+            // 先短超时探测可用线路，再加载首页；否则会卡在失效线路上等 WebView 网络超时
+            lifecycleScope.launch {
+                val target = withContext(Dispatchers.IO) { Mirrors.probe() }
+                mBinding.w.post { mBinding.w.loadUrl(target) }
+            }
         }
         SetDraggable().with(this).onto(mBinding.fab)
     }
@@ -222,6 +236,39 @@ class MainActivity: ToolsBoxActivity() {
                 wmdlt?.get()?.setChapterImages(listChapter[0].substringAfterLast(' '), images)
             }
         } }
+    }
+
+    private var origStatusBarColor: Int = 0
+    private var origWindowBackground: Drawable? = null
+    private var origNavigationBarColor: Int = 0
+
+    override fun onResume() {
+        super.onResume()
+        applyNightBars()
+    }
+
+    /** 夜间模式下把系统状态栏/导航栏也改成黑色，避免顶部与底部出现白边。 */
+    private fun applyNightBars() {
+        val on = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).getBoolean(JS.NIGHT_KEY, false)
+        window.statusBarColor = if (on) Color.BLACK else origStatusBarColor
+        // 窗口底色也要跟着变：页面若有透明缝隙（如滚动条区域），否则会露出主题的白色
+        window.decorView.background = if (on) ColorDrawable(Color.BLACK) else origWindowBackground
+        window.navigationBarColor = if (on) Color.BLACK else origNavigationBarColor
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(if (on) 0 else mask, mask)
+        } else {
+            @Suppress("DEPRECATION")
+            var flags = window.decorView.systemUiVisibility
+            flags = if (on) {
+                flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv() and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+            } else {
+                flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            }
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = flags
+        }
     }
 
     override fun onDestroy() {

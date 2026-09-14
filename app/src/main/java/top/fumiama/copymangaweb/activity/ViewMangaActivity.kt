@@ -3,13 +3,17 @@ package top.fumiama.copymangaweb.activity
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.app.Dialog
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.Drawable
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.widget.ImageView
 import android.widget.SeekBar
 import android.widget.Toast
 import android.window.OnBackInvokedCallback
@@ -18,8 +22,11 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.bumptech.glide.Glide
+import com.bumptech.glide.request.target.CustomViewTarget
+import com.bumptech.glide.request.transition.Transition
 import top.fumiama.copymangaweb.R
 import top.fumiama.copymangaweb.activity.reader.ContinuousMangaAdapter
+import top.fumiama.copymangaweb.activity.reader.InvertTone
 import top.fumiama.copymangaweb.activity.reader.PagedMangaAdapter
 import top.fumiama.copymangaweb.activity.reader.ReaderOverlayController
 import top.fumiama.copymangaweb.activity.MainActivity.Companion.wm
@@ -29,6 +36,7 @@ import top.fumiama.copymangaweb.tool.PropertiesTools
 import top.fumiama.copymangaweb.tool.PagesManager
 import top.fumiama.copymangaweb.view.ScaleImageView
 import top.fumiama.copymangaweb.web.JSHidden
+import top.fumiama.copymangaweb.web.JS
 import top.fumiama.copymangaweb.web.WebChromeClient
 import java.io.File
 import java.lang.ref.WeakReference
@@ -58,6 +66,8 @@ class ViewMangaActivity : ToolsBoxActivity() {
     private var streamFinished = false
     private var streamDeclaredCount = 0
     private var userRequestedExit = false
+    // 正在切换章节：重启 Activity 时不要把 skipBackOnExit 复位，交给新实例
+    private var switchingChapter = false
     private var backInvokedCallback: OnBackInvokedCallback? = null
     private val streamSeenUrls = LinkedHashSet<String>()
     private var pagedAdapter: PagedMangaAdapter? = null
@@ -92,6 +102,7 @@ class ViewMangaActivity : ToolsBoxActivity() {
         mBinding = ActivityViewmangaBinding.inflate(layoutInflater)
         setContentView(mBinding.root)
         registerBackCallback()
+        applyNightMode()
         va = WeakReference(this)
         p = PropertiesTools(File("$filesDir/settings.properties"))
         r2l = p["r2l"] == "true"
@@ -155,7 +166,10 @@ class ViewMangaActivity : ToolsBoxActivity() {
         titleText = lines[0].substringBeforeLast(' ')
         nextChapterUrl = lines[1].let { if(it == "null") null else it }
         previousChapterUrl = lines[2].let { if(it == "null") null else it }
-        runOnUiThread { mBinding.oneinfo.inftitle.ttitle.text = titleText }
+        runOnUiThread {
+            mBinding.oneinfo.inftitle.ttitle.text = titleText
+            updateChapterNavState()
+        }
     }
     private fun setEarlyTapLayerEnabled(enabled: Boolean) {
         mBinding.onec.apply { post {
@@ -361,6 +375,189 @@ class ViewMangaActivity : ToolsBoxActivity() {
         finishAfterTransition()
     }
 
+    /** 相邻章节是否可切换，用于按钮置灰。 */
+    private fun hasAdjacentChapter(goNext: Boolean): Boolean = if (dlZip2View) {
+        val list = zipList.orEmpty()
+        list.getOrNull(zipPosition + if (goNext) 1 else -1) != null
+    } else {
+        (if (goNext) nextChapterUrl else previousChapterUrl) != null
+    }
+
+    private fun updateChapterNavState() {
+        val hasPrev = hasAdjacentChapter(false)
+        val hasNext = hasAdjacentChapter(true)
+        mBinding.oneinfo.btprevchapter.isEnabled = hasPrev
+        mBinding.oneinfo.btnextchapter.isEnabled = hasNext
+    }
+
+    /**
+     * 直接切换到相邻章节：准备好该章的启动参数后重启本 Activity，
+     * 复用既有的初始化/流式收集流程，无需退回详情页再进入。
+     */
+    fun gotoAdjacentChapter(goNext: Boolean) {
+        if (dlZip2View) {
+            val newPosition = zipPosition + if (goNext) 1 else -1
+            val chapter = zipList.orEmpty().getOrNull(newPosition)
+            if (chapter == null) {
+                Toast.makeText(this, "已经到头了~", Toast.LENGTH_SHORT).show()
+                return
+            }
+            zipPosition = newPosition
+            titleText = chapter.nameWithoutExtension
+            zipFile = chapter
+        } else {
+            val url = if (goNext) nextChapterUrl else previousChapterUrl
+            if (url.isNullOrBlank()) {
+                Toast.makeText(this, "已经到头了~", Toast.LENGTH_SHORT).show()
+                return
+            }
+            streamChapterUrl = url
+            titleText = "加载中..."
+            nextChapterUrl = null
+            previousChapterUrl = null
+            imgUrls = arrayOf()
+            zipFile = null
+        }
+        pn = if (goNext) FIRST_PAGE else LAST_PAGE
+        switchingChapter = true
+        startActivity(Intent(this, ViewMangaActivity::class.java))
+        finish()
+    }
+
+    /** 夜间模式：由设置页开关经 JS 桥写入偏好，这里把阅读器底色改为黑色。 */
+    private val isNightMode: Boolean
+        get() = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).getBoolean(JS.NIGHT_KEY, false)
+
+    /** 反色模式：off / auto（自动识别黑白页）/ on。 */
+    private val invertMode: String
+        get() = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).getString(JS.INVERT_KEY, "off") ?: "off"
+
+    /** 反色线条补偿增益（1.0 = 不补偿）。 */
+    private var invertGain: Float
+        get() = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).getFloat(JS.INVERT_GAIN_KEY, 1f)
+        set(value) {
+            getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).edit()
+                .putFloat(JS.INVERT_GAIN_KEY, value).apply()
+        }
+
+    /** 反色补偿的黑场：压掉纸面残留，使背景保持纯黑。 */
+    private var invertBlack: Float
+        get() = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).getFloat(JS.INVERT_BLACK_KEY, 0f)
+        set(value) {
+            getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).edit()
+                .putFloat(JS.INVERT_BLACK_KEY, value).apply()
+        }
+
+    private var lutCache: IntArray? = null
+    private var lutCacheKey = ""
+
+    private fun toneLut(): IntArray {
+        val g = invertGain
+        val b = invertBlack
+        val key = "$g/$b"
+        lutCache?.let { if (lutCacheKey == key) return it }
+        return InvertTone.buildLut(b, g).also {
+            lutCache = it
+            lutCacheKey = key
+        }
+    }
+
+    /**
+     * 抽样判断这一页是否偏彩色。黑白扫描页三通道差异很小，彩色页则有相当比例的像素存在明显色差。
+     * 必须在**源位图**上判定：补偿曲线在墨量趋近 0 处斜率很大，会放大噪声导致误判。
+     */
+    private fun isColorful(bmp: Bitmap): Boolean {
+        val w = bmp.width
+        val h = bmp.height
+        if (w <= 0 || h <= 0) return true
+        val step = maxOf(1, minOf(w, h) / 120)
+        var total = 0
+        var colorful = 0
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                val p = bmp.getPixel(x, y)
+                val r = (p shr 16) and 0xFF
+                val g = (p shr 8) and 0xFF
+                val b = p and 0xFF
+                if (maxOf(r, g, b) - minOf(r, g, b) > 40) colorful++
+                total++
+                x += step
+            }
+            y += step
+        }
+        return total == 0 || colorful.toFloat() / total >= 0.02f
+    }
+
+    private fun shouldInvert(bmp: Bitmap): Boolean = when (invertMode) {
+        "on" -> true
+        "auto" -> !isColorful(bmp)
+        else -> false
+    }
+
+    /** 把源位图按当前设置画到页面上；不修改源位图（避免污染 Glide 缓存）。 */
+    private fun displayPage(view: ImageView, bmp: Bitmap?) {
+        if (bmp == null) {
+            view.setImageResource(R.drawable.ic_dl)
+            return
+        }
+        if (shouldInvert(bmp)) view.setImageBitmap(InvertTone.apply(bmp, toneLut()))
+        else view.setImageBitmap(bmp)
+    }
+
+    /** 补偿参数变化后重绘当前页面。 */
+    private fun refreshPages() {
+        lutCache = null
+        lutCacheKey = ""
+        when (readerMode) {
+            ReaderMode.SINGLE_PAGE -> runCatching { loadOneImg() }
+            ReaderMode.PAGED -> if (count > 0) pagedAdapter?.notifyItemRangeChanged(0, count)
+            ReaderMode.CONTINUOUS -> if (count > 0) continuousAdapter?.notifyItemRangeChanged(0, count)
+        }
+    }
+
+    /** 网络图片：手动接管 Glide 的交付，以便在设置前拿到源位图做检测与补偿。 */
+    private fun loadNetworkInto(imageView: ImageView, url: String) {
+        Glide.with(this)
+            .asBitmap()
+            .load(toolsBox.resolution.wrap(url))
+            .placeholder(R.drawable.ic_dl)
+            .dontAnimate()
+            .into(object : CustomViewTarget<ImageView, Bitmap>(imageView) {
+                override fun onResourceLoading(placeholder: Drawable?) {
+                    imageView.setImageDrawable(placeholder)
+                }
+
+                override fun onLoadFailed(errorDrawable: Drawable?) {
+                    imageView.setImageResource(R.drawable.ic_dl)
+                }
+
+                override fun onResourceCleared(placeholder: Drawable?) {
+                    imageView.setImageDrawable(placeholder)
+                }
+
+                override fun onResourceReady(resource: Bitmap, transition: Transition<in Bitmap>?) {
+                    displayPage(imageView, resource)
+                }
+            })
+    }
+
+    private fun applyNightMode() {
+        if (!isNightMode) return
+        val black = Color.BLACK
+        val fg = Color.parseColor("#D8D8D8")
+        mBinding.vcp.setBackgroundColor(black)
+        mBinding.vone.root.setBackgroundColor(black)
+        mBinding.vp.setBackgroundColor(black)
+        mBinding.continuousPages.setBackgroundColor(black)
+        mBinding.oneinfo.infseekrow.setBackgroundResource(R.drawable.rndbg_dark)
+        mBinding.oneinfo.inftxtprogress.setTextColor(fg)
+        mBinding.oneinfo.inftitle.titlecard.setCardBackgroundColor(Color.parseColor("#1C1C1C"))
+        mBinding.oneinfo.inftitle.ttitle.setTextColor(fg)
+        mBinding.infcard.idc.setCardBackgroundColor(Color.parseColor("#1C1C1C"))
+    }
+
     private fun getPageNumber(): Int {
         return when (readerMode) {
             ReaderMode.SINGLE_PAGE, ReaderMode.CONTINUOUS -> currentItem + 1
@@ -413,17 +610,15 @@ class ViewMangaActivity : ToolsBoxActivity() {
 
     private fun loadOneImg(hidePanel: Boolean = true) {
         mBinding.vone.onei.resetImageTransform()
-        if(dlZip2View) mBinding.vone.onei.apply { post { setImageBitmap(getImgBitmap(currentItem)) } }
+        if(dlZip2View) mBinding.vone.onei.apply { post {
+            displayPage(this, getImgBitmap(currentItem))
+        } }
         else {
             val url = imgUrls.getOrNull(currentItem)
             if (url.isNullOrBlank()) {
                 mBinding.vone.onei.apply { post { setImageResource(R.drawable.ic_dl) } }
             } else {
-                Glide.with(this@ViewMangaActivity)
-                    .load(toolsBox.resolution.wrap(url))
-                    .placeholder(R.drawable.ic_dl)
-                    .dontAnimate()
-                    .into(mBinding.vone.onei)
+                loadNetworkInto(mBinding.vone.onei, url)
             }
         }
         updateSeekBar(hidePanel)
@@ -555,11 +750,7 @@ class ViewMangaActivity : ToolsBoxActivity() {
             imageView.setImageResource(R.drawable.ic_dl)
             return
         }
-        Glide.with(this)
-            .load(toolsBox.resolution.wrap(url))
-            .placeholder(R.drawable.ic_dl)
-            .dontAnimate()
-            .into(imageView)
+        loadNetworkInto(imageView, url)
         preloadAround(position)
     }
 
@@ -569,7 +760,7 @@ class ViewMangaActivity : ToolsBoxActivity() {
             val bitmap = getImgBitmap(position)
             imageView.post {
                 if (!isFinishing && !isDestroyed && imageView.tag == position) {
-                    imageView.setImageBitmap(bitmap)
+                    displayPage(imageView, bitmap)
                 }
             }
         }
@@ -618,6 +809,9 @@ class ViewMangaActivity : ToolsBoxActivity() {
             setOnClickListener { overlayController.toggleDrawer() }
         } }
         mBinding.oneinfo.inftxtprogress.apply { post { text = "$pageNum/$size" } }
+        mBinding.oneinfo.btprevchapter.apply { post { setOnClickListener { gotoAdjacentChapter(false) } } }
+        mBinding.oneinfo.btnextchapter.apply { post { setOnClickListener { gotoAdjacentChapter(true) } } }
+        updateChapterNavState()
     }
 
     private fun prepareIdBtVH() {
@@ -630,7 +824,55 @@ class ViewMangaActivity : ToolsBoxActivity() {
         } }
     }
 
+    /**
+     * 反色补偿的两个旋钮（Levels 中间段模型，参数相互独立）：
+     * - 线条增益 gain：1.00 = 不补偿，向右把「半墨」提成线，等效加粗；
+     * - 背景黑度 black：压掉补偿把纸面抬起来造成的灰雾，默认 0。
+     */
+    private fun prepareIdBtTone() {
+        mBinding.infcard.idtoneseek.apply { post {
+            max = ((InvertTone.MAX_GAIN - InvertTone.MIN_GAIN) * 100).toInt()
+            progress = ((invertGain - InvertTone.MIN_GAIN) * 100).toInt().coerceIn(0, max)
+            mBinding.infcard.idtonevalue.text = "%.2f".format(invertGain)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    mBinding.infcard.idtonevalue.text = "%.2f".format(InvertTone.MIN_GAIN + p / 100f)
+                }
+
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+
+                override fun onStopTrackingTouch(sb: SeekBar?) {
+                    invertGain = InvertTone.MIN_GAIN + (sb?.progress ?: 0) / 100f
+                    mBinding.infcard.idtonevalue.text = "%.2f".format(invertGain)
+                    refreshPages()
+                }
+            })
+        } }
+
+        mBinding.infcard.idblackseek.apply { post {
+            max = (InvertTone.MAX_BLACK * 100).toInt()
+            progress = (invertBlack * 100).toInt().coerceIn(0, max)
+            mBinding.infcard.idblackvalue.text = "%.2f".format(invertBlack)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    mBinding.infcard.idblackvalue.text = "%.2f".format(p / 100f)
+                }
+
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+
+                override fun onStopTrackingTouch(sb: SeekBar?) {
+                    invertBlack = (sb?.progress ?: 0) / 100f
+                    mBinding.infcard.idblackvalue.text = "%.2f".format(invertBlack)
+                    refreshPages()
+                }
+            })
+        } }
+    }
+
     private fun prepareIdBtVolTurn() {
+        prepareIdBtTone()
         mBinding.infcard.idtbvolturn.apply { post {
             isChecked = volTurnPage
             setOnClickListener {
@@ -692,7 +934,9 @@ class ViewMangaActivity : ToolsBoxActivity() {
         dialog?.dismiss()
         dialog = null
         mBinding.wcollector.destroy()
-        if (userRequestedExit && !dlZip2View) wm?.get()?.mBinding?.w?.goBack()
+        val skipBack = skipBackOnExit
+        if (!switchingChapter) skipBackOnExit = false
+        if (userRequestedExit && !dlZip2View && !skipBack) wm?.get()?.mBinding?.w?.goBack()
         if (streamUrl != null) streamChapterUrl = null
         if (va?.get() === this) va = null
         super.onDestroy()
@@ -748,6 +992,9 @@ class ViewMangaActivity : ToolsBoxActivity() {
         var cd: File? = null
         var pn = FIRST_PAGE
         var streamChapterUrl: String? = null
+        // 由 JS.loadComicDirect 设置：跳过中间页直接进入阅读器时，退出不需要 goBack
+        var skipBackOnExit = false
+
     }
 
     private enum class ReaderMode {
