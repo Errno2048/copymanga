@@ -33,6 +33,10 @@ class WebViewClient(private val context: Context, jsFileName: String):WebViewCli
         // about:blank / data: / blob: 等常见于站内 iframe，而 onPageStarted 无法区分
         // 主框架与子框架——若在这里拦截并 goBack()，主框架会被退回历史首项（空白页）。
         if (!target.startsWith("http://") && !target.startsWith("https://")) return
+        // onPageFinished 可能被挂住的第三方资源拖住，这里兜底保证注入一定发生
+        view?.postDelayed({
+            if (!injectedUrls.contains(target)) inject(view, target)
+        }, 1500)
         if (!Mirrors.allows(target)) {
             view?.goBack()
             Toast.makeText(context, R.string.blocked_ad, Toast.LENGTH_SHORT).show()
@@ -54,15 +58,29 @@ class WebViewClient(private val context: Context, jsFileName: String):WebViewCli
         view?.post { view.loadUrl(next) }
     }
 
+    private val injectedUrls = HashSet<String>()
+
+    /**
+     * 注入脚本。注意不能只在 onPageFinished 里注入：站点会引入若干第三方资源，
+     * 只要有一个挂住，load 事件就会长时间不来、onPageFinished 不触发，脚本便始终没有注入
+     * （表现为夜间/小说/个人页等功能全部失效）。因此 onPageStarted 之后再挂一个延迟兜底。
+     */
+    private fun inject(view: WebView?, url: String?) {
+        if (view == null) return
+        if (url != null) {
+            if (injectedUrls.size > 32) injectedUrls.clear()
+            injectedUrls.add(url)
+        }
+        view.evaluateJavascript(js, null)
+        Log.d("MyWC", "Inject JS into: $url")
+    }
+
     override fun onPageFinished(view: WebView?, url: String?) {
         if (!pageHadError) {
             mainFrameFailures = 0
             url?.let { Mirrors.markWorking(context, it) }
         }
-        Handler(Looper.getMainLooper()).postDelayed({
-            view?.evaluateJavascript(js, null)
-            Log.d("MyWC", "Inject JS into: $url")
-        }, 500)
+        Handler(Looper.getMainLooper()).postDelayed({ inject(view, url) }, 500)
         super.onPageFinished(view, url)
     }
 

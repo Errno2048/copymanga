@@ -284,6 +284,7 @@ if (typeof (loaded) == "undefined") {
                 self.installNovelVolumeHook();
                 self.installPersonalHooks();
                 self.fixPersonalTab();
+                self.installRouterGuard();
                 // 未登录却还留着上一次的身份/缓存时兜底清理
                 if (self.loggedIn()) self.accountCleared = false;
                 else if (!self.accountCleared) {
@@ -566,7 +567,7 @@ if (typeof (loaded) == "undefined") {
             host.insertBefore(wrap, host.firstChild);
             self.applyNight();
         },
-        // 卷列表按 DOM 顺序与接口顺序一一对应；已下载的卷交给原生阅读器
+        // 卷列表按 DOM 顺序与接口顺序一一对应；点击卷一律交给原生阅读器
         installNovelVolumeHook: function () {
             if (this.novelHookInstalled) return;
             this.novelHookInstalled = true;
@@ -584,9 +585,7 @@ if (typeof (loaded) == "undefined") {
                 var idx = items.indexOf(el);
                 if (idx < 0 || !book.volumes[idx]) return;
                 var volumeId = book.volumes[idx].id;
-                var local = false;
-                try { local = GM.isNovelVolumeLocal(book.name, volumeId); } catch (err) {}
-                if (!local) return;
+                // 不再要求“已下载”：一律用内嵌阅读器打开，未下载的卷由它在线取正文
                 e.stopPropagation();
                 e.preventDefault();
                 self.openNovelVolume(book, volumeId);

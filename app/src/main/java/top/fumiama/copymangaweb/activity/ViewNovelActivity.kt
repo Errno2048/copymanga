@@ -7,11 +7,13 @@ import android.view.View
 import android.widget.Toast
 import top.fumiama.copymangaweb.R
 import top.fumiama.copymangaweb.databinding.ActivityViewnovelBinding
+import top.fumiama.copymangaweb.tool.InsetsTools
 import top.fumiama.copymangaweb.tool.NightTint
 import top.fumiama.copymangaweb.tool.NovelApi
 import top.fumiama.copymangaweb.tool.NovelBookMeta
 import top.fumiama.copymangaweb.tool.NovelStore
 import top.fumiama.copymangaweb.tool.NovelVolumeMeta
+import top.fumiama.copymangaweb.tool.ReadingProgress
 import java.util.concurrent.Executors
 
 /**
@@ -32,6 +34,8 @@ class ViewNovelActivity : Activity() {
         super.onCreate(savedInstanceState)
         mBinding = ActivityViewnovelBinding.inflate(layoutInflater)
         setContentView(mBinding.root)
+        // 与其他页面一致：把状态栏/挖孔/手势条的安全区作为内边距，避免顶栏被系统栏压住
+        InsetsTools.applySafeContentInsets(this, mBinding.root)
         fontSize = getSharedPreferences(PREF, MODE_PRIVATE).getFloat(KEY_FONT, 18f)
         mBinding.vntitle.isearch.visibility = View.GONE
         applyNight()
@@ -70,22 +74,28 @@ class ViewNovelActivity : Activity() {
             return
         }
         meta = m
-        var v = volumeId?.let { m.details[it] } ?: m.details.values.firstOrNull()
+        val saved = ReadingProgress.novel(this, book)
+        // 未指定卷时（如从“我的下载”进入）回到上次读到的卷与章
+        val targetId = volumeId ?: saved?.volumeId
+        var v = targetId?.let { id -> m.details[id] ?: fetchVolume(m, id) }
         if (v == null) {
             val firstId = m.volumes.firstOrNull()?.id
-            v = firstId?.let { NovelApi.volumeDetail(m.apiBase, m.pathWord, it) }
-            if (v != null) {
-                m.details[v.id] = v
-                NovelStore.save(this, m)
-            }
+            v = firstId?.let { fetchVolume(m, it) }
         }
         if (v == null) {
             toastOnUi("无法获取卷信息")
             finishOnUi()
             return
         }
-        loadVolume(v, 0)
+        val startChapter = if (saved != null && saved.volumeId == v.id) saved.chapterIndex else 0
+        loadVolume(v, startChapter)
     }
+
+    private fun fetchVolume(m: NovelBookMeta, volumeId: String): NovelVolumeMeta? =
+        NovelApi.volumeDetail(m.apiBase, m.pathWord, volumeId)?.also {
+            m.details[it.id] = it
+            NovelStore.save(this, m)
+        }
 
     private fun loadVolume(v: NovelVolumeMeta, startChapter: Int) {
         val m = meta ?: return
@@ -126,6 +136,9 @@ class ViewNovelActivity : Activity() {
         mBinding.vnscroll.post { mBinding.vnscroll.scrollTo(0, 0) }
         mBinding.vnprev.isEnabled = chapterIndex > 0 || !v.prev.isNullOrBlank()
         mBinding.vnnext.isEnabled = chapterIndex < v.chapters.size - 1 || !v.next.isNullOrBlank()
+        if (ch != null) {
+            ReadingProgress.saveNovel(this, meta?.name.orEmpty(), v.id, v.name, chapterIndex, ch.name)
+        }
     }
 
     private fun stepChapter(delta: Int) {

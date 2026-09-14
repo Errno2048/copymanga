@@ -17,6 +17,9 @@
     <string name="loading">加载中…</string>
     <string name="prev_chapter">上一章</string>
     <string name="next_chapter">下一章</string>
+    <string name="reader_invert_off">反色·关</string>
+    <string name="reader_invert_auto">反色·自动</string>
+    <string name="reader_invert_on">反色·开</string>
     <string name="line_tone">反色线条补偿</string>
     <string name="font_dec">A-</string>
     <string name="font_inc">A+</string>

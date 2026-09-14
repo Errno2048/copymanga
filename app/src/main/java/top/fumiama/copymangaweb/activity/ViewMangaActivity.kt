@@ -33,6 +33,7 @@ import top.fumiama.copymangaweb.activity.MainActivity.Companion.wm
 import top.fumiama.copymangaweb.activity.template.ToolsBoxActivity
 import top.fumiama.copymangaweb.databinding.ActivityViewmangaBinding
 import top.fumiama.copymangaweb.tool.PropertiesTools
+import top.fumiama.copymangaweb.tool.ReadingProgress
 import top.fumiama.copymangaweb.tool.PagesManager
 import top.fumiama.copymangaweb.view.ScaleImageView
 import top.fumiama.copymangaweb.web.JSHidden
@@ -121,6 +122,7 @@ class ViewMangaActivity : ToolsBoxActivity() {
         }
         mBinding.oneinfo.inftitle.ttitle.apply { post { text = titleText } }
         Log.d("MyVM", "dlZip2View: $dlZip2View, mangaZip: $mangaZip, streamUrl: $streamUrl")
+        restoreReadingProgress()
         if(dlZip2View && mangaZip?.exists() != true) toolsBox.toastError("已经到头了~")
         else if(!dlZip2View && !streamUrl.isNullOrBlank()) startStreamingCollector(streamUrl!!)
         else Thread {
@@ -383,11 +385,58 @@ class ViewMangaActivity : ToolsBoxActivity() {
         (if (goNext) nextChapterUrl else previousChapterUrl) != null
     }
 
+    /** 底部一行：上一章 / 下一章 / 反色。日漫模式(从右往左)下左右按钮的文案与行为互换。 */
+    private fun prepareChapterNav() {
+        mBinding.oneinfo.btprevchapter.setOnClickListener { gotoAdjacentChapter(r2l) }
+        mBinding.oneinfo.btnextchapter.setOnClickListener { gotoAdjacentChapter(!r2l) }
+        mBinding.oneinfo.btinvert.setOnClickListener { cycleInvertMode() }
+        applyChapterNavOrder()
+        updateInvertButton()
+        updateChapterNavState()
+    }
+
+    private fun applyChapterNavOrder() {
+        mBinding.oneinfo.btprevchapter.setText(if (r2l) R.string.next_chapter else R.string.prev_chapter)
+        mBinding.oneinfo.btnextchapter.setText(if (r2l) R.string.prev_chapter else R.string.next_chapter)
+    }
+
     private fun updateChapterNavState() {
         val hasPrev = hasAdjacentChapter(false)
         val hasNext = hasAdjacentChapter(true)
-        mBinding.oneinfo.btprevchapter.isEnabled = hasPrev
-        mBinding.oneinfo.btnextchapter.isEnabled = hasNext
+        // 右侧按钮在 LTR 下是「下一章」、在日漫模式下是「上一章」，可用性要跟着语义走
+        mBinding.oneinfo.btprevchapter.isEnabled = if (r2l) hasNext else hasPrev
+        mBinding.oneinfo.btnextchapter.isEnabled = if (r2l) hasPrev else hasNext
+    }
+
+    /** 阅读器内的反色快捷开关：与网页设置共用同一份存储。 */
+    private fun cycleInvertMode() {
+        val next = when (invertMode) {
+            "off" -> "auto"
+            "auto" -> "on"
+            else -> "off"
+        }
+        getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).edit()
+            .putString(JS.INVERT_KEY, next).apply()
+        // 采集用 WebView 与主页面同源，可直接同步网页端的 localStorage
+        mBinding.wcollector.post {
+            runCatching {
+                mBinding.wcollector.evaluateJavascript("localStorage.setItem('cm_invert','$next')", null)
+            }
+        }
+        lutCache = null
+        lutCacheKey = ""
+        updateInvertButton()
+        refreshPages()
+    }
+
+    private fun updateInvertButton() {
+        mBinding.oneinfo.btinvert.setText(
+            when (invertMode) {
+                "on" -> R.string.reader_invert_on
+                "auto" -> R.string.reader_invert_auto
+                else -> R.string.reader_invert_off
+            }
+        )
     }
 
     /**
@@ -558,6 +607,37 @@ class ViewMangaActivity : ToolsBoxActivity() {
         mBinding.infcard.idc.setCardBackgroundColor(Color.parseColor("#1C1C1C"))
     }
 
+    /** 上一次读到的位置：同一章直接回到该页。 */
+    private fun restoreReadingProgress() {
+        val pathWord = chapterPathWord() ?: return
+        val chapterId = chapterId() ?: return
+        if (pn != FIRST_PAGE) return          // 调用方已指定起始页（如切章）
+        val saved = ReadingProgress.comic(this, pathWord) ?: return
+        if (saved.chapterId != chapterId || saved.page <= 0) return
+        pn = saved.page
+        Log.d("MyVM", "resume at page ${saved.page} of ${saved.chapterName}")
+    }
+
+    private fun saveReadingProgress() {
+        val pathWord = chapterPathWord() ?: return
+        val chapterId = chapterId() ?: return
+        val page = runCatching { getPageNumber() }.getOrDefault(0)
+        if (page <= 0) return
+        ReadingProgress.saveComic(this, pathWord, chapterId, titleText, page, count)
+        Log.d("MyVM", "save progress $pathWord/$chapterId page=$page/$count")
+    }
+
+    private fun chapterPathWord(): String? =
+        streamUrl?.let { Regex("/comic/([^/]+)/chapter/").find(it)?.groupValues?.getOrNull(1) }
+
+    private fun chapterId(): String? =
+        streamUrl?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+
+    override fun onPause() {
+        super.onPause()
+        if (!dlZip2View) saveReadingProgress()
+    }
+
     private fun getPageNumber(): Int {
         return when (readerMode) {
             ReaderMode.SINGLE_PAGE, ReaderMode.CONTINUOUS -> currentItem + 1
@@ -648,7 +728,11 @@ class ViewMangaActivity : ToolsBoxActivity() {
             setOnClickListener {
                 if (mBinding.infcard.idtblr.isChecked) p["r2l"] = "true"
                 else p["r2l"] = "false"
-                Toast.makeText(this@ViewMangaActivity, "下次浏览生效", Toast.LENGTH_SHORT).show()
+                // 翻页方向下次浏览生效；但章节按钮的左右语义立即跟随，避免误操作
+                r2l = mBinding.infcard.idtblr.isChecked
+                applyChapterNavOrder()
+                updateChapterNavState()
+                Toast.makeText(this@ViewMangaActivity, "翻页方向下次浏览生效", Toast.LENGTH_SHORT).show()
             }
         } }
     }
@@ -809,9 +893,7 @@ class ViewMangaActivity : ToolsBoxActivity() {
             setOnClickListener { overlayController.toggleDrawer() }
         } }
         mBinding.oneinfo.inftxtprogress.apply { post { text = "$pageNum/$size" } }
-        mBinding.oneinfo.btprevchapter.apply { post { setOnClickListener { gotoAdjacentChapter(false) } } }
-        mBinding.oneinfo.btnextchapter.apply { post { setOnClickListener { gotoAdjacentChapter(true) } } }
-        updateChapterNavState()
+        prepareChapterNav()
     }
 
     private fun prepareIdBtVH() {

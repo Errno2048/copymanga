@@ -85,6 +85,16 @@
                 android:alpha="0.85"
                 android:minHeight="36dp"
                 android:text="@string/next_chapter" />
+
+            <Button
+                android:id="@+id/btinvert"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_marginLeft="8dp"
+                android:alpha="0.85"
+                android:minHeight="36dp"
+                android:text="@string/reader_invert_off" />
         </LinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </layout>
