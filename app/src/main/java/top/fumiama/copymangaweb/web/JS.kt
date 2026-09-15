@@ -67,6 +67,18 @@ class JS {
         const val NIGHT_KEY = "on"
         const val INVERT_KEY = "invert_mode"
         const val INVERT_STYLE_KEY = "invert_style"
+        const val COMIC_NAME_PREFIX = "comicname_"
+
+        /** 下载时记录 pathWord -> 漫画名，供本地进度与「續看」解析（避免再请求接口）。 */
+        fun rememberComicName(context: Context, pathWord: String, comicName: String) {
+            if (pathWord.isBlank() || comicName.isBlank()) return
+            context.getSharedPreferences(NIGHT_PREF, Context.MODE_PRIVATE).edit()
+                .putString(COMIC_NAME_PREFIX + pathWord, comicName).apply()
+        }
+
+        private fun comicNameOf(context: Context, pathWord: String): String? =
+            context.getSharedPreferences(NIGHT_PREF, Context.MODE_PRIVATE)
+                .getString(COMIC_NAME_PREFIX + pathWord, null)
         const val INVERT_GAIN_KEY = "invert_gain"
         const val INVERT_BLACK_KEY = "invert_black"
     }
@@ -124,7 +136,9 @@ class JS {
     @JavascriptInterface
     fun lastComicChapter(pathWord: String, comicName: String): String {
         val ctx = wm?.get() ?: return ""
-        val local = comicName.takeIf { it.isNotBlank() }
+        // 页面侧不再请求漫画接口（会被风控），漫画名由下载时记下的映射解析
+        val name = (comicName.takeIf { it.isNotBlank() } ?: comicNameOf(ctx, pathWord)).orEmpty()
+        val local = name.takeIf { it.isNotBlank() }
             ?.let { ReadingProgress.comic(ctx, "zip:$it") }
         val online = pathWord.takeIf { it.isNotBlank() }
             ?.let { ReadingProgress.comic(ctx, it) }
@@ -135,7 +149,7 @@ class JS {
         o.addProperty("page", p.page)
         o.addProperty("total", p.total)
         o.addProperty("local", p === local)
-        o.addProperty("comicName", comicName)
+        o.addProperty("comicName", name.orEmpty())
         return o.toString()
     }
 

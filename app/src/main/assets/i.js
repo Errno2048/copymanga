@@ -602,21 +602,6 @@ if (typeof (loaded) == "undefined") {
             }
             return null;
         },
-        // 漫画名（下载目录用的就是它），按 pathWord 缓存
-        comicName: function (pw, cb) {
-            var self = this;
-            self._comicNames = self._comicNames || {};
-            if (self._comicNames[pw]) { cb(self._comicNames[pw]); return; }
-            fetch(self.apiBaseOf() + "/api/v3/comic2/" + pw)
-                .then(function (r) { return r.json(); })
-                .then(function (j) {
-                    var n = j && j.results && j.results.comic && j.results.comic.name;
-                    if (!n) return;
-                    self._comicNames[pw] = n;
-                    cb(n);
-                })
-                .catch(function () {});
-        },
         installContinueButton: function () {
             var kind = this.detailKind();
             if (!kind) return;
@@ -668,8 +653,10 @@ if (typeof (loaded) == "undefined") {
                 self._comicInfos[pw] = info;
                 self.applyContinueButton(info);
             };
-            tryInfo(self._comicNames && self._comicNames[pw]);
-            self.comicName(pw, tryInfo);
+            // 注意：这里绝不能请求 /api/v3/comic2/<pw>。该接口对未登录客户端返回 210
+            // （反破解风控），而注入是每次进详情页都会跑的，密集的未授权请求会触发封禁。
+            // 漫画名交给原生侧在本地下载记录里解析。
+            tryInfo("");
         },
         applyContinueButton: function (info) {
             var btn = this.detailActionButton();

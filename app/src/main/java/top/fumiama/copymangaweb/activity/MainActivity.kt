@@ -163,6 +163,12 @@ class MainActivity: ToolsBoxActivity() {
     fun setFab(content: String, sourceUrl: String, comicTitle: String) {
         if (content.isBlank() || content == "[]" || !isRequestedDetailsPage(sourceUrl)) return
         DlActivity.comicName = comicTitle
+        // 记下 pathWord -> 漫画名：之后「續看」解析本地进度用它，不必再请求漫画接口
+        runCatching {
+            android.net.Uri.parse(sourceUrl).pathSegments
+                .lastOrNull { it.isNotBlank() }
+                ?.let { JS.rememberComicName(this, it, comicTitle) }
+        }
         json = content
         lifecycleScope.launch {
             withContext(Dispatchers.Main) {

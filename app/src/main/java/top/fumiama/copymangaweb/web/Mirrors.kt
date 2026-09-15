@@ -15,6 +15,9 @@ object Mirrors {
     private const val PREF = "mirrors"
     private const val KEY_WORKING = "working_index"
     private const val PROBE_TIMEOUT_MS = 3500
+    private const val BROWSER_UA =
+        "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/110.0.0.0 Mobile Safari/537.36"
 
     @Volatile private var list: Array<String> = emptyArray()
     @Volatile private var index = 0
@@ -81,6 +84,10 @@ object Mirrors {
                 readTimeout = PROBE_TIMEOUT_MS
                 instanceFollowRedirects = false
                 requestMethod = "GET"
+                // 补上浏览器式请求头：裸请求（无 UA/Accept/Referer）是很明显的程序指纹
+                setRequestProperty("User-Agent", BROWSER_UA)
+                setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9")
             }
             val code = conn.responseCode
             // 只要 HTTP 层有响应就算线路可达（302/403 等同样说明域名与链路正常）
