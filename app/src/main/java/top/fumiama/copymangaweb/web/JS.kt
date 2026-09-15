@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.webkit.JavascriptInterface
+import top.fumiama.copymangaweb.activity.MainActivity
 import top.fumiama.copymangaweb.activity.MainActivity.Companion.wm
 import top.fumiama.copymangaweb.activity.ViewMangaActivity
 import top.fumiama.copymangaweb.activity.ViewNovelActivity
@@ -173,6 +174,25 @@ class JS {
         ViewMangaActivity.previousChapterUrl = null
         ctx.startActivity(android.content.Intent(ctx, ViewMangaActivity::class.java))
         return true
+    }
+
+    /**
+     * 另开一个独立页面加载该 URL（详情页用）。当前页面（列表）的 DOM 与滚动位置
+     * 完全不受影响，返回时即为原样。
+     */
+    @JavascriptInterface
+    fun openPage(url: String) {
+        val ctx = wm?.get() ?: return
+        if (url.isBlank()) return
+        ctx.startActivity(
+            Intent(ctx, ctx.javaClass).putExtra(MainActivity.EXTRA_START_URL, url)
+        )
+    }
+
+    /** 关闭当前独立页面（详情页的返回）。 */
+    @JavascriptInterface
+    fun closePage() {
+        wm?.get()?.finish()
     }
 
     @JavascriptInterface

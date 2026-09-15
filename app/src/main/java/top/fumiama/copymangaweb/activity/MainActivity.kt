@@ -87,10 +87,16 @@ class MainActivity: ToolsBoxActivity() {
                 loadJSInterface(JSHidden())
             } }
 
-            // 先短超时探测可用线路，再加载首页；否则会卡在失效线路上等 WebView 网络超时
-            lifecycleScope.launch {
-                val target = withContext(Dispatchers.IO) { Mirrors.probe() }
-                mBinding.w.post { mBinding.w.loadUrl(target) }
+            // 指定了起始 URL（详情页等独立页面）：直接加载，不必再探测线路
+            val start = intent.getStringExtra(EXTRA_START_URL)
+            if (!start.isNullOrBlank()) {
+                mBinding.w.post { mBinding.w.loadUrl(start) }
+            } else {
+                // 先短超时探测可用线路，再加载首页；否则会卡在失效线路上等 WebView 网络超时
+                lifecycleScope.launch {
+                    val target = withContext(Dispatchers.IO) { Mirrors.probe() }
+                    mBinding.w.post { mBinding.w.loadUrl(target) }
+                }
             }
         }
         SetDraggable().with(this).onto(mBinding.fab)
@@ -250,6 +256,9 @@ class MainActivity: ToolsBoxActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 详情页等独立页面会叠在列表页之上，返回后这里重新登记，
+        // 保证原生桥（打开阅读器/下载）始终指向当前可见的那个页面。
+        wm = WeakReference(this)
         applyNightBars()
     }
 
@@ -293,6 +302,8 @@ class MainActivity: ToolsBoxActivity() {
     }
 
     companion object {
+        /** 由 JS 桥传入：新实例直接加载这个 URL（用于「详情页另开一页」）。 */
+        const val EXTRA_START_URL = "start_url"
         private const val FILE_CHOOSER_RESULT_CODE = 1
         private const val CHAPTER_METADATA_LINE_COUNT = 3
         var wm: WeakReference<MainActivity>? = null

@@ -582,6 +582,13 @@ if (typeof (loaded) == "undefined") {
             var req = { pathWord: book.pathWord, name: book.name, apiBase: book.apiBase, volumes: book.volumes, volume: null };
             try { GM.downloadNovel(JSON.stringify(req)); } catch (e) {}
         },
+        // 详情页路径（漫画 /details/<type>/<pw>，小说 /detailsNovel/<pw>）
+        isDetailPath: function (p) {
+            if (!p) return false;
+            var q = String(p).split("?")[0].split("#")[0];
+            return q.indexOf("/detailsNovel/") === 0 || q.indexOf("/details/") === 0;
+        },
+
         // ---------------- 详情页「續看」 ----------------
         // 详情页的主按钮文本改成最近一次读的卷/话，点击直接回到那个位置。
         detailKind: function () {
@@ -759,6 +766,21 @@ if (typeof (loaded) == "undefined") {
                             fn.call(GM, url);
                         }
                         next(false);   // 取消导航：可见 WebView 留在详情页
+                        return;
+                    }
+                    // 详情页另开独立页面：当前页（列表/搜索等）的 DOM 与滚动位置完全不动。
+                    // 站点自身的「返回」则直接关掉这个独立页面，回到原页面。
+                    var curPath = location.pathname.replace(/^\/h5/, "");
+                    var goingDetail = self.isDetailPath(fp);
+                    var onDetail = self.isDetailPath(curPath);
+                    if (onDetail && !goingDetail) {
+                        try { GM.closePage(); } catch (e) {}
+                        next(false);
+                        return;
+                    }
+                    if (!onDetail && goingDetail) {
+                        try { GM.openPage(location.origin + "/h5" + fp); } catch (e) {}
+                        next(false);
                         return;
                     }
                     setTimeout(function () { self.allowNovel(); }, 300);
