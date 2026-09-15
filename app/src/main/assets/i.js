@@ -19,6 +19,8 @@ if (typeof (loaded) == "undefined") {
         invertKey: "cm_invert",
         // 反色方式：value = 只反转亮度（保持色相）、rgb = 按通道直接反色。
         invertStyleKey: "cm_invert_style",
+        // 跨页面失效标记（同源共享 localStorage，多实例可实时收到 storage 事件）
+        dirtyKey: "cm_dirty",
         tickMs: 800
     };
     var NIGHT_CSS = ""
@@ -307,6 +309,8 @@ if (typeof (loaded) == "undefined") {
                     self.installNovelDownloadButton();
                 }
                 self.installContinueButton();
+                self.watchLogin();
+                self.installShelfHook();
                 self.installNovelVolumeHook();
                 self.installPersonalHooks();
                 self.fixPersonalTab();
@@ -582,6 +586,108 @@ if (typeof (loaded) == "undefined") {
             var req = { pathWord: book.pathWord, name: book.name, apiBase: book.apiBase, volumes: book.volumes, volume: null };
             try { GM.downloadNovel(JSON.stringify(req)); } catch (e) {}
         },
+        // ---------------- 页面栈协作（滚动位置 + 原地返回 + 失效刷新） ----------------
+        pageUrl: function () { return location.origin + location.pathname; },
+        // 站点把内容放在内层容器里滚（首页是 .homeTemplate 等），取最深的可滚动容器
+        scroller: function () {
+            var best = null;
+            var all = document.querySelectorAll("div");
+            for (var i = 0; i < all.length; i++) {
+                var e = all[i];
+                try {
+                    var st = getComputedStyle(e);
+                    if ((st.overflowY === "auto" || st.overflowY === "scroll")
+                        && e.scrollHeight > e.clientHeight + 60) {
+                        if (!best || e.scrollHeight > best.scrollHeight) best = e;
+                    }
+                } catch (x) {}
+            }
+            return best;
+        },
+        scrollTop: function () {
+            var s = this.scroller();
+            if (s) return Math.round(s.scrollTop);
+            return Math.round(window.scrollY || 0);
+        },
+        /** 恢复滚动位置：内容可能是异步渲染的，逐帧重试直到内容足够高 */
+        restoreScroll: function (y) {
+            if (!(y > 0)) return;
+            var self = this;
+            var tries = 0;
+            (function step() {
+                var s = self.scroller();
+                if (s) {
+                    var max = s.scrollHeight - s.clientHeight;
+                    if (max + 40 >= y) { s.scrollTop = Math.min(y, max); self.reportPage(); return; }
+                }
+                if (tries++ < 60) setTimeout(step, 50);
+            })();
+        },
+        reportPage: function () {
+            try {
+                if (typeof GM.reportPage === "function") GM.reportPage(this.pageUrl(), this.scrollTop());
+            } catch (e) {}
+        },
+        // ---------------- 跨页面失效：写入方打标记，读方在显示时刷新 ----------------
+        dirtyMap: function () {
+            try { return JSON.parse(localStorage.getItem(settings.dirtyKey) || "{}"); } catch (e) { return {}; }
+        },
+        markDirty: function (group) {
+            try {
+                var m = this.dirtyMap();
+                m[group] = Date.now();
+                localStorage.setItem(settings.dirtyKey, JSON.stringify(m));
+            } catch (e) {}
+        },
+        routeGroup: function (p) {
+            var q = String(p || location.pathname);
+            if (q.indexOf("/bookrack") >= 0) return "bookrack";
+            if (q.indexOf("/personal") >= 0 || q.indexOf("/personalRecord") >= 0
+                || q.indexOf("/messageList") >= 0 || q.indexOf("/messageboard") >= 0) return "personal";
+            return "";
+        },
+        /** 当前页面若被标记为失效，就刷新一次（刷新前先清标记，避免循环） */
+        checkDirty: function () {
+            var g = this.routeGroup();
+            if (!g) return false;
+            var m = this.dirtyMap();
+            if (!m[g]) return false;
+            try {
+                delete m[g];
+                localStorage.setItem(settings.dirtyKey, JSON.stringify(m));
+            } catch (e) {}
+            // 整页重新加载：这是真正意义上的「刷新」（站点的列表数据缓存在内存里，
+            // 只做路由跳转不会重新拉取）
+            try { location.replace(this.pageUrl()); } catch (e) {}
+            return true;
+        },
+        /** 监听登录态变化：登录/登出会影响书架、个人、浏览记录 */
+        watchLogin: function () {
+            var cur = "";
+            try { cur = localStorage.getItem("user") || ""; } catch (e) {}
+            if (this._lastUser === undefined) { this._lastUser = cur; return; }
+            if (this._lastUser === cur) return;
+            this._lastUser = cur;
+            this.markDirty("bookrack");
+            this.markDirty("personal");
+        },
+        /** 加入/移除书架会改变书架内容，给书架页打失效标记 */
+        installShelfHook: function () {
+            if (this._shelfHooked) return;
+            this._shelfHooked = true;
+            var self = this;
+            document.addEventListener("click", function (e) {
+                var el = e.target;
+                if (!el || !el.closest) return;
+                var btn = el.closest("button,.van-button");
+                if (!btn) return;
+                var t = (btn.textContent || "").trim();
+                if (/加入書架|加入书架|移除書架|移除书架|已加入/.test(t)) {
+                    self.markDirty("bookrack");
+                }
+            }, true);
+        },
+
         // 详情页路径（漫画 /details/<type>/<pw>，小说 /detailsNovel/<pw>）
         isDetailPath: function (p) {
             if (!p) return false;
@@ -787,7 +893,13 @@ if (typeof (loaded) == "undefined") {
                 } catch (e) {}
                 next();
             });
-            router.afterEach(function () { setTimeout(function () { self.allowNovel(); }, 300); });
+            router.afterEach(function () {
+                setTimeout(function () { self.allowNovel(); }, 300);
+                setTimeout(function () {
+                    self.reportPage();
+                    self.checkDirty();
+                }, 400);
+            });
         },
 
         // ---------- 原有逻辑 ----------
@@ -891,3 +1003,47 @@ if (typeof (loaded) == "undefined") {
 } else {
     setTimeout(modify, 1280);
 }
+
+// ---------------- 与页面栈/失效刷新配合的原生入口 ----------------
+(function () {
+    var lastReport = 0;
+    // 内层容器的 scroll 不冒泡，用捕获阶段监听全部滚动
+    document.addEventListener('scroll', function () {
+        var now = Date.now();
+        if (now - lastReport < 500) return;
+        lastReport = now;
+        try { if (window.invoke && window.invoke.reportPage) window.invoke.reportPage(); } catch (e) {}
+    }, true);
+    // 返回键弹回本实例内的上一个页面：原地跳转并恢复滚动位置
+    window.__cmNavigateTo = function (url, scrollY) {
+        try {
+            var self = window.invoke;
+            var app = document.getElementById('app');
+            var vm = app && (app.__vue__ || (app.__vue_app__ && app.__vue_app__._instance));
+            var R = vm && vm.$root && vm.$root.$router;
+            if (!self || !R) return false;
+            var path = String(url).replace(location.origin, '');
+            if (path.indexOf('/h5') === 0) path = path.slice(3) || '/';
+            R.replace(path);
+            setTimeout(function () { self.restoreScroll(scrollY); }, 350);
+            return true;
+        } catch (e) { return false; }
+    };
+    // 页面重新可见：上报当前位置；被重建时恢复滚动；必要时刷新失效页面
+    window.__cmOnShow = function (scrollHint) {
+        try {
+            var self = window.invoke;
+            if (!self) return;
+            if (self.checkDirty && self.checkDirty()) return;
+            if (scrollHint >= 0 && self.restoreScroll) self.restoreScroll(scrollHint);
+            if (self.reportPage) self.reportPage();
+        } catch (e) {}
+    };
+    // 同源其它实例写了失效标记：如果正是当前页面，立刻刷新
+    window.addEventListener('storage', function (e) {
+        try {
+            if (e.key !== 'cm_dirty') return;
+            if (window.invoke && window.invoke.checkDirty) window.invoke.checkDirty();
+        } catch (x) {}
+    });
+})();

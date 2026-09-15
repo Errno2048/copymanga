@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.fumiama.copymangaweb.BuildConfig
+import top.fumiama.copymangaweb.tool.PageStack
 import top.fumiama.copymangaweb.R
 import top.fumiama.copymangaweb.activity.DlActivity.Companion.json
 import top.fumiama.copymangaweb.activity.template.ToolsBoxActivity
@@ -60,6 +61,10 @@ class MainActivity: ToolsBoxActivity() {
 
         wm = WeakReference(this)
         mh = MainHandler(Looper.myLooper()!!)
+        scrollHint = intent.getIntExtra(EXTRA_SCROLL_HINT, -1)
+        PageStack.register(pageKey, isHomeInstance)
+        instances[pageKey] = WeakReference(this)
+        evictLruIfNeeded()
         toolsBox.netInfo.let {
             if(it == "无网络" || it == "错误") {
                 setFab2DlList()
@@ -117,9 +122,49 @@ class MainActivity: ToolsBoxActivity() {
         }
     }
 
+    /**
+     * 返回：优先按页面栈弹回上一个页面。
+     * - 上个页面在本实例内：让页面原地跳转并恢复滚动位置；
+     * - 上个页面在别的存活实例里：关掉当前实例，露出那一个（它的状态原样保留）；
+     * - 那个实例已被 LRU 淘汰：带滚动位置重建该页面；
+     * - 栈里没有上一页：不跳转，交回系统（退出）。
+     */
     private fun navigateBack() {
-        if (mBinding.w.canGoBack()) mBinding.w.goBack()
-        else finishAfterTransition()
+        val now = System.currentTimeMillis()
+        if (now - lastBackAt < 400) return          // 防抖，避免连按两次直接把页面弹掉
+        lastBackAt = now
+        val target = PageStack.popBack()
+        if (target == null) {
+            finishAfterTransition()
+            return
+        }
+        if (target.key == pageKey) {
+            runCatching {
+                mBinding.w.evaluateJavascript(
+                    "window.__cmNavigateTo&&window.__cmNavigateTo('" + target.route + "'," + target.scrollY + ")",
+                    null
+                )
+            }
+            return
+        }
+        val other = instances[target.key]?.get()
+        if (other != null && other !== this) {
+            other.scrollHint = target.scrollY       // 它自己还在，只需恢复滚动位置
+            finishAfterTransition()
+            return
+        }
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .putExtra(EXTRA_START_URL, target.route)
+                .putExtra(EXTRA_SCROLL_HINT, target.scrollY)
+        )
+    }
+
+    /** 实例数超过上限时淘汰最久未使用的非首页实例（它的栈条目会一并清掉）。 */
+    private fun evictLruIfNeeded() {
+        val victim = PageStack.lruVictim() ?: return
+        if (victim == pageKey) return
+        instances[victim]?.get()?.finishAfterTransition()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -250,6 +295,15 @@ class MainActivity: ToolsBoxActivity() {
         } }
     }
 
+    /** 本实例在页面栈里的标识；无 EXTRA_START_URL 的实例是首页实例（不参与淘汰）。 */
+    /** 页面栈用的实例标识（JS 桥上报时要用）。 */
+    val pageKey = "page-" + (++pageSeq)
+    private val isHomeInstance: Boolean
+        get() = intent.getStringExtra(EXTRA_START_URL).isNullOrBlank()
+    /** 被淘汰后重建时要恢复的滚动位置（-1 表示不恢复） */
+    private var scrollHint = -1
+    private var lastBackAt = 0L
+
     private var origStatusBarColor: Int = 0
     private var origWindowBackground: Drawable? = null
     private var origNavigationBarColor: Int = 0
@@ -259,7 +313,22 @@ class MainActivity: ToolsBoxActivity() {
         // 详情页等独立页面会叠在列表页之上，返回后这里重新登记，
         // 保证原生桥（打开阅读器/下载）始终指向当前可见的那个页面。
         wm = WeakReference(this)
+        PageStack.touch(pageKey)
         applyNightBars()
+        notifyPageShown()
+    }
+
+    /** 页面重新可见：让页面检查 dirty 是否需要刷新，并恢复被重建时记录的位置。 */
+    private fun notifyPageShown() {
+        val hint = scrollHint
+        scrollHint = -1
+        mBinding.w.postDelayed({
+            runCatching {
+                mBinding.w.evaluateJavascript(
+                    "window.__cmOnShow&&window.__cmOnShow(" + hint + ")", null
+                )
+            }
+        }, 600)
     }
 
     /** 夜间模式下把系统状态栏/导航栏也改成黑色，避免顶部与底部出现白边。 */
@@ -298,13 +367,20 @@ class MainActivity: ToolsBoxActivity() {
         mh?.dispose()
         mh = null
         if (wm?.get() === this) wm = null
+        PageStack.unregister(pageKey)
+        instances.remove(pageKey)
         super.onDestroy()
     }
 
     companion object {
         /** 由 JS 桥传入：新实例直接加载这个 URL（用于「详情页另开一页」）。 */
         const val EXTRA_START_URL = "start_url"
+        /** 被淘汰后重建时传入要恢复的滚动位置。 */
+        const val EXTRA_SCROLL_HINT = "scroll_hint"
         private const val FILE_CHOOSER_RESULT_CODE = 1
+        private var pageSeq = 0
+        /** 存活实例表：页面栈据此判断目标页面是否还活着 */
+        val instances = LinkedHashMap<String, WeakReference<MainActivity>>()
         private const val CHAPTER_METADATA_LINE_COUNT = 3
         var wm: WeakReference<MainActivity>? = null
         var mh: MainHandler? = null

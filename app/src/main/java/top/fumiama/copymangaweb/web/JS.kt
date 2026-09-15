@@ -13,6 +13,7 @@ import top.fumiama.copymangaweb.tool.ReadingProgress
 import java.io.File
 import top.fumiama.copymangaweb.tool.NovelOpenRequest
 import top.fumiama.copymangaweb.tool.NovelStore
+import top.fumiama.copymangaweb.tool.PageStack
 
 class JS {
     @JavascriptInterface
@@ -174,6 +175,17 @@ class JS {
         ViewMangaActivity.previousChapterUrl = null
         ctx.startActivity(android.content.Intent(ctx, ViewMangaActivity::class.java))
         return true
+    }
+
+    /**
+     * 页面上报当前所在路由与滚动位置：原生侧的页面栈据此记录「上一次访问的页面」，
+     * 返回时才能弹回正确的位置。
+     */
+    @JavascriptInterface
+    fun reportPage(url: String, scrollY: Int) {
+        val ctx = wm?.get() ?: return
+        if (url.isBlank()) return
+        PageStack.report(ctx.pageKey, url, scrollY)
     }
 
     /**
