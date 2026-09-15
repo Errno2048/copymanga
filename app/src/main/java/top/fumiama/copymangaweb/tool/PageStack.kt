@@ -74,6 +74,16 @@ object PageStack {
         return entries.lastOrNull()
     }
 
+    /** 某路由上次记录到的滚动位置（前进导航回该页面时恢复现场用）；没有返回 0 */
+    @Synchronized
+    fun scrollOf(route: String): Int = entries.firstOrNull { it.route == route }?.scrollY ?: 0
+
+    /** 页面被刷新后原滚动位置失效，清掉以免又被恢复回旧位置 */
+    @Synchronized
+    fun forget(route: String) {
+        entries.firstOrNull { it.route == route }?.scrollY = 0
+    }
+
     /** 仅供调试/验证：当前栈内容 */
     @Synchronized
     fun snapshot(): String = entries.joinToString(" | ") { "${it.route}@${it.scrollY}[${it.key}]" }

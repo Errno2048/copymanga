@@ -658,6 +658,7 @@ if (typeof (loaded) == "undefined") {
             } catch (e) {}
             // 整页重新加载：这是真正意义上的「刷新」（站点的列表数据缓存在内存里，
             // 只做路由跳转不会重新拉取）
+            try { if (typeof GM.forgetScroll === 'function') GM.forgetScroll(this.pageUrl()); } catch (e) {}
             try { location.replace(this.pageUrl()); } catch (e) {}
             return true;
         },
@@ -896,8 +897,21 @@ if (typeof (loaded) == "undefined") {
             router.afterEach(function () {
                 setTimeout(function () { self.allowNovel(); }, 300);
                 setTimeout(function () {
-                    self.reportPage();
-                    self.checkDirty();
+                    // 先记下这次路由变化的时间：切换后页面会重新渲染并把滚动归零，
+                    // 滚动监听要忽略这段时间内的变化
+                    self.routeChangedAt = Date.now();
+                    if (self.checkDirty()) return;      // 该页要刷新：不恢复旧位置
+                    // 前进导航到访问过的页面（例如切换底部 tab）：恢复上次的滚动位置
+                    var y = 0;
+                    try {
+                        y = (typeof GM.rememberedScroll === 'function')
+                            ? GM.rememberedScroll(self.pageUrl()) : 0;
+                    } catch (e) {}
+                    if (y > 0) {
+                        self.restoreScroll(y);          // 内部会按恢复后的位置上报
+                    } else {
+                        self.reportPage();              // 首次访问：记录当前位置
+                    }
                 }, 400);
             });
         },
@@ -1011,6 +1025,12 @@ if (typeof (loaded) == "undefined") {
     document.addEventListener('scroll', function () {
         var now = Date.now();
         if (now - lastReport < 500) return;
+        // 路由切换后页面会重新渲染、把滚动归零，那不是用户行为，
+        // 不能把它当成「上次读到的位置」记下来
+        try {
+            if (window.invoke && window.invoke.routeChangedAt
+                && now - window.invoke.routeChangedAt < 700) return;
+        } catch (e) {}
         lastReport = now;
         try { if (window.invoke && window.invoke.reportPage) window.invoke.reportPage(); } catch (e) {}
     }, true);

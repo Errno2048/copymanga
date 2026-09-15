@@ -177,6 +177,20 @@ class JS {
         return true
     }
 
+    /** 该路由上次的滚动位置（前进导航到访问过的页面时恢复现场）；没有返回 0。 */
+    @JavascriptInterface
+    fun rememberedScroll(url: String): Int {
+        if (url.isBlank()) return 0
+        return PageStack.scrollOf(url)
+    }
+
+    /** 页面已刷新，清掉它记录的滚动位置。 */
+    @JavascriptInterface
+    fun forgetScroll(url: String) {
+        if (url.isBlank()) return
+        PageStack.forget(url)
+    }
+
     /**
      * 页面上报当前所在路由与滚动位置：原生侧的页面栈据此记录「上一次访问的页面」，
      * 返回时才能弹回正确的位置。

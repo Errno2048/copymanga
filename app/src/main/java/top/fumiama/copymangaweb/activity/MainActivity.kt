@@ -57,6 +57,9 @@ class MainActivity: ToolsBoxActivity() {
         mBinding.lifecycleOwner = this
         setContentView(mBinding.root)
         InsetsTools.applySafeContentInsets(this, mBinding.root)
+        // 页面渲染前显示的是 WebView 自身底色（默认白）；夜间模式改成黑，
+        // 否则每次加载或新建页面都会先闪一下白底
+        applyPageBackground()
         registerBackCallback()
 
         wm = WeakReference(this)
@@ -331,8 +334,21 @@ class MainActivity: ToolsBoxActivity() {
         }, 600)
     }
 
+    /** WebView 与窗口底色跟随夜间模式，避免加载期间露出默认白底。 */
+    private fun applyPageBackground() {
+        val night = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE)
+            .getBoolean(JS.NIGHT_KEY, false)
+        val bg = if (night) Color.BLACK else Color.WHITE
+        runCatching {
+            mBinding.w.setBackgroundColor(bg)
+            mBinding.wh.setBackgroundColor(bg)
+            window.setBackgroundDrawable(ColorDrawable(bg))
+        }
+    }
+
     /** 夜间模式下把系统状态栏/导航栏也改成黑色，避免顶部与底部出现白边。 */
     private fun applyNightBars() {
+        applyPageBackground()
         val on = getSharedPreferences(JS.NIGHT_PREF, MODE_PRIVATE).getBoolean(JS.NIGHT_KEY, false)
         window.statusBarColor = if (on) Color.BLACK else origStatusBarColor
         // 窗口底色也要跟着变：页面若有透明缝隙（如滚动条区域），否则会露出主题的白色
