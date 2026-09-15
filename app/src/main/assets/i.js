@@ -21,6 +21,8 @@ if (typeof (loaded) == "undefined") {
         invertStyleKey: "cm_invert_style",
         // 跨页面失效标记（同源共享 localStorage，多实例可实时收到 storage 事件）
         dirtyKey: "cm_dirty",
+        // 是否记住各页面的滚动位置（设置页可关）
+        scrollMemKey: "cm_scroll_memory",
         tickMs: 800
     };
     var NIGHT_CSS = ""
@@ -252,6 +254,8 @@ if (typeof (loaded) == "undefined") {
             var style = this.invertStyle();
             var sval = document.getElementById("cm-invert-style-value");
             if (sval) sval.textContent = this.invertStyleLabel(style);
+            var mval = document.getElementById("cm-scrollmem-value");
+            if (mval) mval.textContent = this.scrollMemoryLabel();
             if (this._lastInvertStyle !== style) {
                 this._lastInvertStyle = style;
                 try { if (typeof GM.setInvertStyle === "function") GM.setInvertStyle(style); } catch (e) {}
@@ -265,7 +269,8 @@ if (typeof (loaded) == "undefined") {
             var rows = [
                 { id: "cm-night-cell", kind: "switch", label: "夜间模式" },
                 { id: "cm-invert-cell", kind: "cycle", label: "黑白漫画反色", valueId: "cm-invert-value" },
-                { id: "cm-invert-style-cell", kind: "cycle", label: "反色方式", valueId: "cm-invert-style-value" }
+                { id: "cm-invert-style-cell", kind: "cycle", label: "反色方式", valueId: "cm-invert-style-value" },
+                { id: "cm-scrollmem-cell", kind: "cycle", label: "记住滚动位置", valueId: "cm-scrollmem-value" }
             ];
             for (var i = 0; i < rows.length; i++) {
                 if (document.getElementById(rows[i].id)) continue;
@@ -284,6 +289,7 @@ if (typeof (loaded) == "undefined") {
                         e.preventDefault();
                         if (r.kind === "switch") self.setNight(!self.nightOn());
                         else if (r.id === "cm-invert-style-cell") self.cycleInvertStyle();
+                        else if (r.id === "cm-scrollmem-cell") self.cycleScrollMemory();
                         else self.cycleInvert();
                     });
                 })(row);
@@ -618,8 +624,36 @@ if (typeof (loaded) == "undefined") {
             return Math.round(t.el.scrollTop);
         },
         /** 恢复滚动位置：内容可能是异步渲染的，逐帧重试直到内容足够高 */
+        // 设置项：记住滚动位置（默认开）
+        scrollMemoryOn: function () {
+            try { return localStorage.getItem(settings.scrollMemKey) !== "0"; } catch (e) { return true; }
+        },
+        scrollMemoryLabel: function () { return this.scrollMemoryOn() ? "开" : "关"; },
+        cycleScrollMemory: function () {
+            try { localStorage.setItem(settings.scrollMemKey, this.scrollMemoryOn() ? "0" : "1"); } catch (e) {}
+            this.applyToggles();
+        },
+        // 恢复期间先把内容藏起来（只改不透明度，保留布局与滚动高度），
+        // 落地后再淡入，避免「先看到顶部、过一会儿突然跳走」
+        hideForRestore: function () {
+            var root = document.getElementById("app");
+            if (!root || this._hiddenForRestore) return;
+            this._hiddenForRestore = true;
+            root.style.transition = "none";
+            root.style.opacity = "0";
+            var self = this;
+            setTimeout(function () { self.showAfterRestore(); }, 1200);   // 兜底，不能一直藏着
+        },
+        showAfterRestore: function () {
+            var root = document.getElementById("app");
+            if (!root || !this._hiddenForRestore) return;
+            this._hiddenForRestore = false;
+            root.style.transition = "opacity .12s linear";
+            root.style.opacity = "1";
+        },
         restoreScroll: function (y) {
-            if (!(y > 0)) return;
+            if (!(y > 0)) { this.showAfterRestore(); return; }
+            if (!this.scrollMemoryOn()) { this.showAfterRestore(); return; }
             var self = this;
             var rounds = 0;
             var lastMax = -1;
@@ -632,6 +666,7 @@ if (typeof (loaded) == "undefined") {
                     if (t.win) window.scrollTo(0, Math.min(y, max));
                     else t.el.scrollTop = Math.min(y, max);
                     self.reportPage();
+                    self.showAfterRestore();
                     return;
                 }
                 // 内容还不够高：说明这是增量加载的列表。滚到当前底部去触发站点加载下一页；
@@ -642,6 +677,7 @@ if (typeof (loaded) == "undefined") {
                 else t.el.scrollTop = Math.max(0, max);
                 if (rounds++ < 6 && stagnant < 3) { setTimeout(step, 450); return; }
                 self.reportPage();                      // 到不了目标：停在能够到的位置
+                self.showAfterRestore();
             })();
         },
         reportPage: function () {
@@ -911,6 +947,16 @@ if (typeof (loaded) == "undefined") {
                         next(false);
                         return;
                     }
+                    // 目标页面有记住的位置：在内容渲染前就藏起来，
+                    // 这样不会先看到顶部、再突然跳走（落地后由 restoreScroll 显示回来）
+                    try {
+                        var target = location.origin + "/h5" + fp;
+                        if (self.scrollMemoryOn()
+                            && typeof GM.rememberedScroll === "function"
+                            && GM.rememberedScroll(target) > 0) {
+                            self.hideForRestore();
+                        }
+                    } catch (e) {}
                     setTimeout(function () { self.allowNovel(); }, 300);
                 } catch (e) {}
                 next();
@@ -929,6 +975,7 @@ if (typeof (loaded) == "undefined") {
                             ? GM.rememberedScroll(self.pageUrl()) : 0;
                     } catch (e) {}
                     if (y > 0) {
+                        self.hideForRestore();          // 恢复期间先藏起来，落地再显示
                         self.restoreScroll(y);          // 内部会按恢复后的位置上报
                     } else {
                         self.reportPage();              // 首次访问：记录当前位置
