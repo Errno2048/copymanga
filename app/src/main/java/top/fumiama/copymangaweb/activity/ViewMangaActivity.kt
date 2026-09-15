@@ -532,8 +532,6 @@ class ViewMangaActivity : ToolsBoxActivity() {
 
     private var lutCache: IntArray? = null
     private var lutCacheKey = ""
-    private var scaleCache: FloatArray? = null
-    private var scaleCacheKey = ""
 
     private fun toneLut(): IntArray {
         val g = invertGain
@@ -543,18 +541,6 @@ class ViewMangaActivity : ToolsBoxActivity() {
         return InvertTone.buildLut(b, g).also {
             lutCache = it
             lutCacheKey = key
-        }
-    }
-
-    /** 亮度反色用的缩放系数表（与 LUT 同样按参数缓存）。 */
-    private fun toneScale(): FloatArray {
-        val g = invertGain
-        val b = invertBlack
-        val key = "$g/$b"
-        scaleCache?.let { if (scaleCacheKey == key) return it }
-        return InvertTone.buildValueScale(b, g).also {
-            scaleCache = it
-            scaleCacheKey = key
         }
     }
 
@@ -602,7 +588,8 @@ class ViewMangaActivity : ToolsBoxActivity() {
             // 默认只反转亮度：黑白页结果与直接反色逐像素相同，彩色页则保住色相
             view.setImageBitmap(
                 if (invertStyle == InvertTone.STYLE_RGB) InvertTone.apply(bmp, toneLut())
-                else InvertTone.applyValue(bmp, toneScale())
+                // 亮度反色：同一条曲线，索引用亮度而不是通道值
+                else InvertTone.applyValue(bmp, toneLut())
             )
         } else {
             view.setImageBitmap(bmp)
@@ -613,8 +600,6 @@ class ViewMangaActivity : ToolsBoxActivity() {
     private fun refreshPages() {
         lutCache = null
         lutCacheKey = ""
-        scaleCache = null
-        scaleCacheKey = ""
         when (readerMode) {
             ReaderMode.SINGLE_PAGE -> runCatching { loadOneImg() }
             ReaderMode.PAGED -> if (count > 0) pagedAdapter?.notifyItemRangeChanged(0, count)

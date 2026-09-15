@@ -675,7 +675,7 @@ if (typeof (loaded) == "undefined") {
                 lastMax = max;
                 if (t.win) window.scrollTo(0, Math.max(0, max));
                 else t.el.scrollTop = Math.max(0, max);
-                if (rounds++ < 6 && stagnant < 3) { setTimeout(step, 450); return; }
+                if (rounds++ < 10 && stagnant < 4) { setTimeout(step, 400); return; }
                 self.reportPage();                      // 到不了目标：停在能够到的位置
                 self.showAfterRestore();
             })();
@@ -932,21 +932,8 @@ if (typeof (loaded) == "undefined") {
                         next(false);   // 取消导航：可见 WebView 留在详情页
                         return;
                     }
-                    // 详情页另开独立页面：当前页（列表/搜索等）的 DOM 与滚动位置完全不动。
-                    // 站点自身的「返回」则直接关掉这个独立页面，回到原页面。
-                    var curPath = location.pathname.replace(/^\/h5/, "");
-                    var goingDetail = self.isDetailPath(fp);
-                    var onDetail = self.isDetailPath(curPath);
-                    if (onDetail && !goingDetail) {
-                        try { GM.closePage(); } catch (e) {}
-                        next(false);
-                        return;
-                    }
-                    if (!onDetail && goingDetail) {
-                        try { GM.openPage(location.origin + "/h5" + fp); } catch (e) {}
-                        next(false);
-                        return;
-                    }
+                    // 详情页现在走页内导航：滚动位置由页面栈记住/恢复，
+                    // 返回键由 MainActivity 的页面栈统一处理，不再需要独立页面
                     // 目标页面有记住的位置：在内容渲染前就藏起来，
                     // 这样不会先看到顶部、再突然跳走（落地后由 restoreScroll 显示回来）
                     try {

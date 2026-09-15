@@ -83,36 +83,21 @@ object InvertTone {
     }
 
     /**
-     * 亮度反色用的缩放系数表：out_c = in_c * scale[V]，V = max(r,g,b)。
-     *
-     * scale[V] = comp(1 - V) / V；V = 0（纯黑）时目标为白，用 0 作哨兵，
-     * 由 applyValue 特判成白色（避免 0/0）。
+     * 亮度反色用的查表：索引是 Rec.709 亮度 L（0..255），值是该亮度反色 + 补偿后的目标亮度 L'。
+     * 与 buildLut 是同一根曲线，只是把「输入通道值」换成「亮度」。
      */
-    fun buildValueScale(blackPoint: Float, gain: Float): FloatArray {
-        val b = blackPoint.coerceIn(0f, 0.9f)
-        val g = gain.coerceIn(MIN_GAIN, 4f)
-        val inv = 1.0 / g.toDouble()
-        val span = (1f - b).coerceAtLeast(1e-3f)
-        val out = FloatArray(256)
-        for (v in 0..255) {
-            val lv = v / 255f
-            if (lv <= 0f) {
-                out[v] = 0f
-                continue
-            }
-            val k = 1f - lv
-            val kk = ((k - b) / span).coerceIn(0f, 1f).toDouble()
-            val target = Math.pow(kk, inv).toFloat()
-            out[v] = target / lv
-        }
-        return out
-    }
+    fun buildLumaLut(blackPoint: Float, gain: Float): IntArray = buildLut(blackPoint, gain)
 
     /**
-     * 只反转亮度：色相、饱和度保持（纯灰像素结果与 apply 的查表一致）。
-     * 同样不修改入参位图。
+     * 只反转亮度：把每个通道写成「亮度 + 偏移」，反色后保留同样的偏移。
+     *
+     * 这样近中性的暗色不会被放大成彩色——例如 (34,22,22) 的饱和度 S=0.35 但绝对色度只有
+     * 12/255，若按比例缩放色度（等于保持饱和度）会被放大到 L' 的量级而变成明显的红色；
+     * 保留偏移则它反色后仍是「略微偏暖的浅灰」，与视觉一致。
+     * 偏移越界时按同一比例压缩（保色相、尽量少失真）。
+     * 纯灰像素偏移为 0，结果与 apply() 的查表逐像素相同。
      */
-    fun applyValue(src: Bitmap, scale: FloatArray): Bitmap {
+    fun applyValue(src: Bitmap, lut: IntArray): Bitmap {
         val w = src.width
         val h = src.height
         if (w <= 0 || h <= 0) return src
@@ -130,16 +115,20 @@ object InvertTone {
                 val r = (p shr 16) and 0xFF
                 val g = (p shr 8) and 0xFF
                 val b = p and 0xFF
-                val v = maxOf(r, g, b)
-                if (v == 0) {
-                    // 纯黑 -> 纯白（保持不透明）
-                    row[x] = (a shl 24) or 0xFFFFFF
-                    continue
-                }
-                val k = scale[v]
-                val nr = (r * k).toInt().coerceIn(0, 255)
-                val ng = (g * k).toInt().coerceIn(0, 255)
-                val nb = (b * k).toInt().coerceIn(0, 255)
+                // Rec.709 亮度，权重和为 256，因此纯灰时 L 精确等于该灰度值
+                val l = (54 * r + 183 * g + 19 * b) shr 8
+                val l2 = lut[l]
+                val or = r - l
+                val og = g - l
+                val ob = b - l
+                val maxPos = maxOf(or, og, ob, 0)
+                val maxNeg = maxOf(-or, -og, -ob, 0)
+                var f = 1.0f
+                if (maxPos > 0 && l2 + maxPos > 255) f = minOf(f, (255 - l2).toFloat() / maxPos)
+                if (maxNeg > 0 && l2 - maxNeg < 0) f = minOf(f, l2.toFloat() / maxNeg)
+                val nr = (l2 + or * f).toInt().coerceIn(0, 255)
+                val ng = (l2 + og * f).toInt().coerceIn(0, 255)
+                val nb = (l2 + ob * f).toInt().coerceIn(0, 255)
                 row[x] = (a shl 24) or (nr shl 16) or (ng shl 8) or nb
             }
             out.setPixels(row, 0, w, 0, y, w, 1)
