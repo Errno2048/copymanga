@@ -587,7 +587,8 @@ if (typeof (loaded) == "undefined") {
             try { GM.downloadNovel(JSON.stringify(req)); } catch (e) {}
         },
         // ---------------- 页面栈协作（滚动位置 + 原地返回 + 失效刷新） ----------------
-        pageUrl: function () { return location.origin + location.pathname; },
+        // 页面标识含查询串：同一 path 的不同筛选（若有）各记各的位置
+        pageUrl: function () { return location.origin + location.pathname + (location.search || ""); },
         // 站点把内容放在内层容器里滚（首页是 .homeTemplate 等），取最深的可滚动容器
         scroller: function () {
             var best = null;
@@ -604,23 +605,43 @@ if (typeof (loaded) == "undefined") {
             }
             return best;
         },
+        // 滚动目标：优先内层可滚动容器，找不到就用文档本身
+        // （排行榜、分类列表这类页面是文档在滚，不能只认内层容器）
+        scrollTarget: function () {
+            var el = this.scroller();
+            if (el) return { el: el, win: false };
+            return { el: document.scrollingElement || document.documentElement, win: true };
+        },
         scrollTop: function () {
-            var s = this.scroller();
-            if (s) return Math.round(s.scrollTop);
-            return Math.round(window.scrollY || 0);
+            var t = this.scrollTarget();
+            if (t.win) return Math.round(window.scrollY || t.el.scrollTop || 0);
+            return Math.round(t.el.scrollTop);
         },
         /** 恢复滚动位置：内容可能是异步渲染的，逐帧重试直到内容足够高 */
         restoreScroll: function (y) {
             if (!(y > 0)) return;
             var self = this;
-            var tries = 0;
+            var rounds = 0;
+            var lastMax = -1;
+            var stagnant = 0;
             (function step() {
-                var s = self.scroller();
-                if (s) {
-                    var max = s.scrollHeight - s.clientHeight;
-                    if (max + 40 >= y) { s.scrollTop = Math.min(y, max); self.reportPage(); return; }
+                var t = self.scrollTarget();
+                var max = t.win ? (t.el.scrollHeight - window.innerHeight)
+                                : (t.el.scrollHeight - t.el.clientHeight);
+                if (max + 40 >= y) {                    // 内容够了：精确落位
+                    if (t.win) window.scrollTo(0, Math.min(y, max));
+                    else t.el.scrollTop = Math.min(y, max);
+                    self.reportPage();
+                    return;
                 }
-                if (tries++ < 60) setTimeout(step, 50);
+                // 内容还不够高：说明这是增量加载的列表。滚到当前底部去触发站点加载下一页；
+                // 每轮留间隔、最多几轮，避免制造请求突发；高度不再增长就放弃。
+                if (max > lastMax + 20) stagnant = 0; else stagnant++;
+                lastMax = max;
+                if (t.win) window.scrollTo(0, Math.max(0, max));
+                else t.el.scrollTop = Math.max(0, max);
+                if (rounds++ < 6 && stagnant < 3) { setTimeout(step, 450); return; }
+                self.reportPage();                      // 到不了目标：停在能够到的位置
             })();
         },
         reportPage: function () {
