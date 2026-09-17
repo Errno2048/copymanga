@@ -20,6 +20,8 @@ import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import android.view.MotionEvent
+import kotlin.math.abs
 import androidx.viewpager2.widget.ViewPager2
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomViewTarget
@@ -120,6 +122,8 @@ class ViewMangaActivity : ToolsBoxActivity() {
             setContentView(R.layout.dialog_unzipping)
             show()
         }
+        installBoundarySwipe()
+        overlayController.hideDrawer()      // 下栏默认隐藏，点击后才与上栏一起出现
         mBinding.oneinfo.inftitle.ttitle.apply { post { text = titleText } }
         Log.d("MyVM", "dlZip2View: $dlZip2View, mangaZip: $mangaZip, streamUrl: $streamUrl")
         restoreReadingProgress()
@@ -402,6 +406,66 @@ class ViewMangaActivity : ToolsBoxActivity() {
     private fun applyChapterNavOrder() {
         mBinding.oneinfo.btprevchapter.setText(if (r2l) R.string.next_chapter else R.string.prev_chapter)
         mBinding.oneinfo.btnextchapter.setText(if (r2l) R.string.prev_chapter else R.string.next_chapter)
+        // 日漫模式（从右往左）：进度条也要反过来——起始端在右、终止端在左，
+        // 数字仍按 LTR 显示，只是被放到另一侧
+        val dir = if (r2l) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
+        mBinding.oneinfo.infseekrow.layoutDirection = dir
+        mBinding.oneinfo.inftxtprogress.layoutDirection = View.LAYOUT_DIRECTION_LTR
+    }
+
+    /**
+     * 漫画的第一页/最后一页继续往外滑 -> 切换上一章/下一章。
+     * 只观察不拦截：正常翻页仍交给 ViewPager2，仅在边界上接管手势。
+     */
+    private fun installBoundarySwipe() {
+        val rv = mBinding.vp.getChildAt(0) as? RecyclerView ?: return
+        rv.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
+            private var claimed = false
+            private var downX = 0f
+            private var downY = 0f
+            private var downItem = 0
+
+            override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = e.x
+                        downY = e.y
+                        downItem = mBinding.vp.currentItem
+                        claimed = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (!claimed) {
+                            val dx = e.x - downX
+                            val dy = e.y - downY
+                            val out = when {
+                                dx < 0f -> downItem >= count - 1     // 已在最后一页还往左滑
+                                dx > 0f -> downItem <= 0             // 已在第一页还往右滑
+                                else -> false
+                            }
+                            if (out && abs(dx) > abs(dy) && abs(dx) > 24 * resources.displayMetrics.density) {
+                                claimed = true
+                                return true
+                            }
+                        }
+                    }
+                }
+                return claimed
+            }
+
+            override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) {
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_UP -> {
+                        val dx = e.x - downX
+                        if (claimed && abs(dx) > mBinding.vp.width * 0.15f) {
+                            // 与翻页方向一致地越过边界：左滑=往后翻，右滑=往前翻
+                            gotoAdjacentChapter(dx < 0)
+                        }
+                        claimed = false
+                    }
+                    MotionEvent.ACTION_CANCEL -> claimed = false
+                }
+            }
+        })
     }
 
     private fun updateChapterNavState() {
@@ -494,6 +558,13 @@ class ViewMangaActivity : ToolsBoxActivity() {
         pn = if (goNext) FIRST_PAGE else LAST_PAGE
         switchingChapter = true
         startActivity(Intent(this, ViewMangaActivity::class.java))
+        // 换章动效方向跟着阅读方向走：日漫模式（r2l）下「上一章」是从右侧滑入，
+        // 普通模式（ltr）下「上一章」是从左侧切入；下一章相反。
+        if (if (goNext) !r2l else r2l) {
+            overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left)
+        } else {
+            overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right)
+        }
         finish()
     }
 
@@ -1086,6 +1157,7 @@ class ViewMangaActivity : ToolsBoxActivity() {
     }
 
     fun showSettings() {
+        overlayController.showDrawer()      // 下栏（原屏幕下方的按钮）与上栏一起显示
         mBinding.oneinfo.infseek.visibility = View.VISIBLE
         mBinding.oneinfo.inftitle.isearch.visibility = View.VISIBLE
         val v = mBinding.oneinfo.root

@@ -39,20 +39,29 @@ class ReaderOverlayController(
     }
 
     fun hideDrawer() {
-        if (!drawerVisible) return
+        // 用可见性隐藏：启动时位移偏移还是 0，只靠 translationY 挡不住（下栏会一直可见）
         val offset = drawerOffset()
         Log.d("ReaderOverlay", "hide drawer offset=$offset")
         binding.infcard.apply {
+            if (!drawerVisible) {
+                root.visibility = android.view.View.INVISIBLE   // 初始状态：直接不显示
+                idc.alpha = 0.3f
+                return
+            }
             ObjectAnimator.ofFloat(idc, "alpha", idc.alpha, 0.3f).setDuration(ANIMATION_DURATION_MS).start()
-            ObjectAnimator.ofFloat(root, "translationY", root.translationY, offset).setDuration(ANIMATION_DURATION_MS).start()
+            ObjectAnimator.ofFloat(root, "translationY", root.translationY, offset)
+                .setDuration(ANIMATION_DURATION_MS).start()
+            root.postDelayed({ if (!drawerVisible) root.visibility = android.view.View.INVISIBLE }, ANIMATION_DURATION_MS)
         }
         drawerVisible = false
     }
 
-    private fun showDrawer() {
+    fun showDrawer() {
         val offset = drawerOffset()
         Log.d("ReaderOverlay", "show drawer offset=$offset")
         binding.infcard.apply {
+            root.visibility = android.view.View.VISIBLE
+            root.translationY = offset
             ObjectAnimator.ofFloat(idc, "alpha", idc.alpha, 0.8f).setDuration(ANIMATION_DURATION_MS).start()
             ObjectAnimator.ofFloat(root, "translationY", root.translationY, 0f).setDuration(ANIMATION_DURATION_MS).start()
         }

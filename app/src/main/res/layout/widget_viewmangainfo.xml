@@ -69,32 +69,44 @@
             <Button
                 android:id="@+id/btprevchapter"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginEnd="4dp"
                 android:layout_weight="1"
-                android:alpha="0.85"
-                android:minHeight="36dp"
-                android:text="@string/prev_chapter" />
+                android:background="@drawable/reader_btn"
+                android:minHeight="0dp"
+                android:minWidth="0dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="@string/prev_chapter"
+                android:textSize="13sp" />
 
             <Button
                 android:id="@+id/btnextchapter"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
                 android:layout_weight="1"
-                android:layout_marginStart="8dp"
-                android:layout_marginLeft="8dp"
-                android:alpha="0.85"
-                android:minHeight="36dp"
-                android:text="@string/next_chapter" />
+                android:background="@drawable/reader_btn"
+                android:minHeight="0dp"
+                android:minWidth="0dp"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:text="@string/next_chapter"
+                android:textSize="13sp" />
 
             <Button
                 android:id="@+id/btinvert"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_marginLeft="8dp"
-                android:alpha="0.85"
-                android:minHeight="36dp"
-                android:text="@string/reader_invert_off" />
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="@drawable/reader_btn"
+                android:minHeight="0dp"
+                android:minWidth="0dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="@string/reader_invert_off"
+                android:textSize="13sp" />
         </LinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </layout>
