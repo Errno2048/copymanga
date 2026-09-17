@@ -95,6 +95,10 @@ class ViewNovelActivity : Activity() {
     private var swipeDownY = 0f
     private var swipeDownItem = 0
     private var scrollMode = false
+    /** 每页整行数（章内统一）；滚动模式的一屏即这一页 */
+    private var linesPerPage = 0
+    /** 实际行距（px，章内统一）：由每页行数反推，使整页正好铺满正文框 */
+    private var lineSpacingPx = 0f
     private var pageOffsets: MutableList<Int> = mutableListOf()
     /**
      * 每页对应的滚动偏移（scrollY）。取该值时页首行正好落在正文区顶部，
@@ -139,8 +143,13 @@ class ViewNovelActivity : Activity() {
     private class Page {
         var layout: Layout? = null
         var topY = 0
+        /** 本页绘制高度（px）：只画到最后一行的行盒底，页底不会露出下一行的头 */
+        var clipH = 0
         var image: Any? = null
     }
+
+    /** 每页行数与行距（都按章统一）。 */
+    private class PageGrid(val perPage: Int, val spacing: Float)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -423,7 +432,10 @@ class ViewNovelActivity : Activity() {
         val v = vol ?: return
         val ch = v.chapters.getOrNull(chapterIndex) ?: return
         mBinding.vnscrolltext.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSize)
-        mBinding.vnscrolltext.setLineSpacing(dpf(LINE_SPACING_DP), 1f)
+        // 与分页共用同一个行距：一屏正好一页，切换位置才严格对齐
+        mBinding.vnscrolltext.setLineSpacing(
+            if (lineSpacingPx > 0f) lineSpacingPx else dpf(LINE_SPACING_DP), 1f
+        )
         mBinding.vnscrolltext.setTextColor(if (night) NightTint.FG else 0xFF333333.toInt())
         mBinding.vnscrolltext.text = NovelStore.chapterText(fullText, ch)
     }
@@ -769,29 +781,32 @@ class ViewNovelActivity : Activity() {
             built.add(Page().also { it.image = if (local.exists()) local else ch.imageUrl })
             offsets.add(0)
             tops.add(0)
+            // 插图页不分页：行距与每页行数回到默认，免得沿用上一章算出来的值
+            linesPerPage = 1
+            lineSpacingPx = dpf(LINE_SPACING_DP)
         } else {
             val text = NovelStore.chapterText(fullText, ch)
             val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
                 textSize = sp(fontSize)
                 color = if (night) NightTint.FG else 0xFF333333.toInt()
             }
-            // 断行策略与滚动模式的 TextView 保持一致，两种模式的换行位置才相同
-            val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, w)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(dpf(LINE_SPACING_DP), 1f)
-                .setIncludePad(false)
-                .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
-                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
-                .build()
+            // 断行策略与滚动模式的 TextView 保持一致，两种模式的换行位置才相同。
+            // 行距不参与折行：先按基础行距量出每行行盒高，定出「每页整几行」，再把
+            // 剩余空间平摊进行间隙，让整页正好铺满正文框（详见 planPageGrid）。
+            val grid = planPageGrid(text, paint, w, h)
+            linesPerPage = grid.perPage
+            lineSpacingPx = grid.spacing
+            val layout = buildBodyLayout(text, paint, w, grid.spacing)
             var line = 0
             while (line < layout.lineCount) {
                 val top = layout.getLineTop(line)
-                var last = layout.getLineForVertical(top + h)
-                if (last < line) last = line
-                if (last >= layout.lineCount) last = layout.lineCount - 1
-                // 整行放不下就不算进本页，避免页底出现被裁掉半行
-                while (last > line && layout.getLineBottom(last) > top + h) last--
-                built.add(Page().also { it.layout = layout; it.topY = top })
+                // 按行切页：一行只可能属于一页，页底不会出现被裁半行 / 重复显示的行
+                val last = minOf(line + grid.perPage - 1, layout.lineCount - 1)
+                built.add(Page().also {
+                    it.layout = layout
+                    it.topY = top
+                    it.clipH = (layout.getLineBottom(last) - top).coerceAtLeast(1)
+                })
                 offsets.add(layout.getLineStart(line))
                 tops.add(top)
                 line = last + 1
@@ -822,6 +837,78 @@ class ViewNovelActivity : Activity() {
         suppressProgressSave = false
         updateStatusLine()
         saveProgress()
+    }
+
+    private fun buildBodyLayout(
+        text: CharSequence,
+        paint: TextPaint,
+        width: Int,
+        spacing: Float
+    ): StaticLayout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+        .setLineSpacing(spacing, 1f)
+        .setIncludePad(false)
+        .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+        .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+        .build()
+
+    /**
+     * 定「每页整几行」与「行距撑到多少」，两者章内统一：
+     *
+     * 1. 先用基础行距量一遍（行距不影响折行，行数与行盒高在最终布局里完全一致），
+     *    逐行取行盒高（不含行距；末行用行盒底）；
+     * 2. N 取「**任意**连续 N 行都放得下（含基础行距）」的最大值 —— 空行、混排
+     *    fallback 字体的行高差也能被覆盖；
+     * 3. 再把 (H - 最坏窗口高) 平摊进 N-1 个行间隙。这样整页恰好铺满正文框：
+     *    页底既不会露出下一行的头（旧实现在页底画的是整章布局的像素切片，下一行
+     *    的头会一起画出来，同一行于是在两页各出现一次），也不会留一条空白；
+     *    且中间每一页都恰好 N 行。
+     *
+     * 行距只会变大不会变小，与滚动模式共用同一个值（一屏 == 一页）。
+     */
+    private fun planPageGrid(text: CharSequence, paint: TextPaint, w: Int, h: Int): PageGrid {
+        val base = dpf(LINE_SPACING_DP)
+        val probe = buildBodyLayout(text, paint, w, base)
+        val n = probe.lineCount
+        if (n <= 1) return PageGrid(1, base)
+        val heights = FloatArray(n)
+        for (i in 0 until n) {
+            heights[i] = if (i < n - 1) {
+                (probe.getLineTop(i + 1) - probe.getLineTop(i)) - base
+            } else {
+                (probe.getLineBottom(i) - probe.getLineTop(i)).toFloat()
+            }
+        }
+        val prefix = FloatArray(n + 1)
+        for (i in 0 until n) prefix[i + 1] = prefix[i] + heights[i]
+        var minPitch = Float.MAX_VALUE
+        for (i in 0 until n) {
+            val p = heights[i] + base
+            if (p < minPitch && p > 0f) minPitch = p
+        }
+        if (minPitch == Float.MAX_VALUE) return PageGrid(1, base)
+        val maxPer = (((h + base) / minPitch).toInt() + 1).coerceIn(1, n)
+        var per = 1
+        var worst = heights[0]
+        for (cand in 2..maxPer) {
+            var maxSum = 0f
+            for (i in 0..(n - cand)) {
+                val s = prefix[i + cand] - prefix[i]
+                if (s > maxSum) maxSum = s
+            }
+            if (maxSum + (cand - 1) * base > h) break
+            per = cand
+            worst = maxSum
+        }
+        // 整章不足两页时（只剩末页）不撑行距：那一页本来就不满
+        val spacing = if (per in 2 until n) maxOf(base, (h - worst) / (per - 1)) else base
+        Log.d(
+            "NovelReader",
+            "grid lines=$n per=$per spacing=%.2f base=%.2f worst=%.1f box=${w}x$h".format(
+                spacing, base, worst
+            )
+        )
+        return PageGrid(per, spacing)
     }
 
     private fun updateTitles() {
@@ -879,7 +966,14 @@ class ViewNovelActivity : Activity() {
             val p = page ?: return
             val l = p.layout ?: return
             canvas.save()
-            canvas.clipRect(paddingLeft, paddingTop, width - paddingRight, height - paddingBottom)
+            // 底线取「本页最后一行的行盒底」而不是控件底：整数像素取整差 1px 时
+            // 也不会把下一行的头画进来（重复显示）
+            val clipBottom = if (p.clipH > 0) {
+                minOf(paddingTop + p.clipH, height - paddingBottom)
+            } else {
+                height - paddingBottom
+            }
+            canvas.clipRect(paddingLeft, paddingTop, width - paddingRight, clipBottom)
             canvas.translate(paddingLeft.toFloat(), (paddingTop - p.topY).toFloat())
             l.draw(canvas)
             canvas.restore()
@@ -995,7 +1089,8 @@ class ViewNovelActivity : Activity() {
         private const val SLIDE_MS = 250L
         /** 边界滑动接管手势的最小横向位移（dp） */
         private const val SWIPE_CLAIM_DP = 24
-        /** 正文行距（dp）；分页与滚动必须用同一个值 */
+        /** 基础（最小）正文行距（dp）。实际行距由每页行数撑满正文框后得到，
+         *  分页与滚动共用同一个值，保证切换阅读方式位置严格对齐 */
         private const val LINE_SPACING_DP = 6f
         private const val MIN_FONT = 12f
         private const val MAX_FONT = 32f
