@@ -10,6 +10,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Typeface
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -99,6 +100,8 @@ class ViewNovelActivity : Activity() {
     private var linesPerPage = 0
     /** 实际行距（px，章内统一）：由每页行数反推，使整页正好铺满正文框 */
     private var lineSpacingPx = 0f
+    /** 本章正文的 Layout（分页与滚动共用同一份，两模式行距/折行必然一致） */
+    private var bodyLayout: Layout? = null
     private var pageOffsets: MutableList<Int> = mutableListOf()
     /**
      * 每页对应的滚动偏移（scrollY）。取该值时页首行正好落在正文区顶部，
@@ -428,16 +431,12 @@ class ViewNovelActivity : Activity() {
         mBinding.vnmode.setText(if (scrollMode) R.string.reader_mode_scroll else R.string.reader_mode_paged)
     }
 
+    /**
+     * 把正文交给滚动视图。这里**不再自己排版**：直接用分页时那份 Layout，
+     * 行距、折行、字色与翻页模式逐像素一致，一屏正好一页。
+     */
     private fun loadScrollText() {
-        val v = vol ?: return
-        val ch = v.chapters.getOrNull(chapterIndex) ?: return
-        mBinding.vnscrolltext.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSize)
-        // 与分页共用同一个行距：一屏正好一页，切换位置才严格对齐
-        mBinding.vnscrolltext.setLineSpacing(
-            if (lineSpacingPx > 0f) lineSpacingPx else dpf(LINE_SPACING_DP), 1f
-        )
-        mBinding.vnscrolltext.setTextColor(if (night) NightTint.FG else 0xFF333333.toInt())
-        mBinding.vnscrolltext.text = NovelStore.chapterText(fullText, ch)
+        mBinding.vnscrollbody.body = bodyLayout
     }
 
     /** 按当前视图推算位置（不改写粘性锚点） */
@@ -458,18 +457,17 @@ class ViewNovelActivity : Activity() {
      * 建过一份布局，此时按页顶像素滚动会落错位置，必须等它按真实宽度重排。
      */
     private fun scrollLayoutReady(): Boolean {
-        val tv = mBinding.vnscrolltext
-        val layout = tv.layout ?: return false
-        if (pageTops.isEmpty() || layout.text !== tv.text) return false
-        val inner = tv.width - tv.paddingLeft - tv.paddingRight
+        val v = mBinding.vnscrollbody
+        val layout = v.body ?: return false
+        if (pageTops.isEmpty() || layout !== bodyLayout) return false
+        val inner = v.width - v.paddingLeft - v.paddingRight
         return inner > 0 && layout.width == inner
     }
 
     /** 滚动到底时最大可滚位置（末页页顶可能超出它，需要单独判定） */
     private fun scrollMaxY(): Int {
-        val tv = mBinding.vnscrolltext
-        return (tv.height + mBinding.vnscroll.paddingTop + mBinding.vnscroll.paddingBottom -
-            mBinding.vnscroll.height).coerceAtLeast(0)
+        return (mBinding.vnscrollbody.height + mBinding.vnscroll.paddingTop +
+            mBinding.vnscroll.paddingBottom - mBinding.vnscroll.height).coerceAtLeast(0)
     }
 
     /** 正文区顶端算第几页：按页顶滚动偏移取最近的一页，比「行 -> 字符」反查精确 */
@@ -784,6 +782,7 @@ class ViewNovelActivity : Activity() {
             // 插图页不分页：行距与每页行数回到默认，免得沿用上一章算出来的值
             linesPerPage = 1
             lineSpacingPx = dpf(LINE_SPACING_DP)
+            bodyLayout = null
         } else {
             val text = NovelStore.chapterText(fullText, ch)
             val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
@@ -797,6 +796,7 @@ class ViewNovelActivity : Activity() {
             linesPerPage = grid.perPage
             lineSpacingPx = grid.spacing
             val layout = buildBodyLayout(text, paint, w, grid.spacing)
+            bodyLayout = layout
             var line = 0
             while (line < layout.lineCount) {
                 val top = layout.getLineTop(line)
@@ -850,6 +850,10 @@ class ViewNovelActivity : Activity() {
         .setIncludePad(false)
         .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
         .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+        // 说明：这里刻意不动 setUseLineSpacingFromFallbacks（跟随平台默认）。
+        // 它会让含 CJK fallback 的行高随机型/字体变化（本机实测 20sp 下每行差 2px），
+        // 但分页与滚动现在共用同一份 Layout，行高再怎么变两边都一致；
+        // planPageGrid 也是逐行量行盒高再取最坏窗口，行高不均匀同样能铺满。
         .build()
 
     /**

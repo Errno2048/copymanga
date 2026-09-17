@@ -47,14 +47,14 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
-        <TextView
-            android:id="@+id/vnscrolltext"
+        <!-- 正文交给自定义 View 直接绘制：与分页共用同一份 StaticLayout。
+             用 TextView 时它按 textAppearance / fallbackLineSpacing 等主题属性
+             另造一份 Layout，部分机型上滚动模式的行距会与分页模式不一致，
+             页首偏移随之逐行漂移。 -->
+        <top.fumiama.copymangaweb.view.NovelBodyView
+            android:id="@+id/vnscrollbody"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:breakStrategy="simple"
-            android:hyphenationFrequency="none"
-            android:includeFontPadding="false"
-            tools:text="正文" />
+            android:layout_height="wrap_content" />
     </ScrollView>
 
     <!-- 滚动模式下文字与上下信息之间做渐变过渡，避免控件压住文字 -->
