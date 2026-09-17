@@ -70,6 +70,8 @@ class JS {
         const val INVERT_KEY = "invert_mode"
         const val INVERT_STYLE_KEY = "invert_style"
         const val COMIC_NAME_PREFIX = "comicname_"
+        const val CREDENTIAL_KEY = "credential"
+        const val CREDENTIAL_ORIGIN_KEY = "credential_origin"
 
         /** 下载时记录 pathWord -> 漫画名，供本地进度与「續看」解析（避免再请求接口）。 */
         fun rememberComicName(context: Context, pathWord: String, comicName: String) {
@@ -175,6 +177,45 @@ class JS {
         ViewMangaActivity.previousChapterUrl = null
         ctx.startActivity(android.content.Intent(ctx, ViewMangaActivity::class.java))
         return true
+    }
+
+    /**
+     * 登录凭证备份。站点的凭证存在 localStorage.user 里（按 origin 各存一份），
+     * 镜像换域就会「掉登录」。这里在原生侧留一份，加载任意镜像域时再种回去。
+     * 纯本地读写，不产生任何网络请求。
+     */
+    @JavascriptInterface
+    fun rememberCredential(json: String, origin: String) {
+        val ctx = wm?.get() ?: return
+        if (json.isBlank()) return
+        ctx.getSharedPreferences(NIGHT_PREF, Context.MODE_PRIVATE).edit()
+            .putString(CREDENTIAL_KEY, json)
+            .putString(CREDENTIAL_ORIGIN_KEY, origin)
+            .apply()
+    }
+
+    /** 备份凭证来自哪个源（镜像域）。据此判断是否该跨域还原。 */
+    @JavascriptInterface
+    fun savedCredentialOrigin(): String {
+        val ctx = wm?.get() ?: return ""
+        return ctx.getSharedPreferences(NIGHT_PREF, Context.MODE_PRIVATE)
+            .getString(CREDENTIAL_ORIGIN_KEY, "") ?: ""
+    }
+
+    @JavascriptInterface
+    fun savedCredential(): String {
+        val ctx = wm?.get() ?: return ""
+        return ctx.getSharedPreferences(NIGHT_PREF, Context.MODE_PRIVATE)
+            .getString(CREDENTIAL_KEY, "") ?: ""
+    }
+
+    @JavascriptInterface
+    fun forgetCredential() {
+        val ctx = wm?.get() ?: return
+        ctx.getSharedPreferences(NIGHT_PREF, Context.MODE_PRIVATE).edit()
+            .remove(CREDENTIAL_KEY)
+            .remove(CREDENTIAL_ORIGIN_KEY)
+            .apply()
     }
 
     /** 该路由上次的滚动位置（前进导航到访问过的页面时恢复现场）；没有返回 0。 */

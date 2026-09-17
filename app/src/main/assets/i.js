@@ -321,12 +321,15 @@ if (typeof (loaded) == "undefined") {
                 self.installPersonalHooks();
                 self.fixPersonalTab();
                 self.installRouterGuard();
-                // 未登录却还留着上一次的身份/缓存时兜底清理
+                // 本域没有凭证但备份里有 -> 先种回去（跨镜像域不掉登录）
+                self.restoreCredential();
+                // 未登录却还留着上一次的身份/缓存时兜底清理（只清缓存，不删凭证）
                 if (self.loggedIn()) self.accountCleared = false;
                 else if (!self.accountCleared) {
                     self.accountCleared = true;
                     self.clearAccount();
                 }
+                self.syncCredential();
                 self.backToPersonalIfNeeded();
                 self.correctPersonalTabLanding();
             }, settings.tickMs);
@@ -358,12 +361,57 @@ if (typeof (loaded) == "undefined") {
                 return root && root.$store ? root.$store : null;
             } catch (e) { return null; }
         },
+        // 持久化登录凭证：站点把它存在 localStorage.user 里，是唯一事实来源
+        storedCredential: function () {
+            try { return localStorage.getItem("user") || ""; } catch (e) { return ""; }
+        },
         loggedIn: function () {
+            // 必须以持久化凭证为准：站点只在 getInfo/postInfo 这类组件里才把 token 灌进 Vuex，
+            // 其它页面（以及任何新文档加载的早期）store 里是空的，据此判定会把好登录清掉。
+            if (this.storedCredential()) return true;
             var store = this.storeOf();
             return !!(store && store.state && store.state.token);
         },
+        // 本域没有凭证但原生备份里有（例如切到了另一个镜像域）：种回去。纯本地，不发请求。
+        restoreCredential: function () {
+            if (this.storedCredential()) return false;
+            var saved = "", from = "";
+            try {
+                saved = (typeof GM.savedCredential === "function") ? GM.savedCredential() : "";
+                from = (typeof GM.savedCredentialOrigin === "function") ? GM.savedCredentialOrigin() : "";
+            } catch (e) {}
+            // 只在「备份来自另一个镜像域」时还原：同域下凭证消失就是真的登出，不能顶回去
+            if (!saved || !from || from === location.origin) return false;
+            try { localStorage.setItem("user", saved); } catch (e) { return false; }
+            try {
+                var store = this.storeOf();
+                var u = JSON.parse(saved);
+                if (store && store.state && u && u.token) {
+                    store.state.token = u.token;
+                    if (u.userId) store.state.userId = u.userId;
+                }
+            } catch (e) {}
+            return true;
+        },
+        // 凭证变化时同步到原生备份；连续几次为空才当作登出（避免写入过程中的瞬时为空）
+        syncCredential: function () {
+            var cur = this.storedCredential();
+            if (cur) {
+                this._emptyTicks = 0;
+                if (this._lastCred !== cur) {
+                    this._lastCred = cur;
+                    try { if (typeof GM.rememberCredential === "function") GM.rememberCredential(cur, location.origin); } catch (e) {}
+                }
+                return;
+            }
+            if (this._lastCred !== undefined && this._lastCred !== "") {
+                // 站点只在登录时写、登出时删，不存在「瞬时为空」，所以空了就是登出
+                this._lastCred = "";
+                try { if (typeof GM.forgetCredential === "function") GM.forgetCredential(); } catch (e) {}
+            }
+        },
         // 清掉上一次登录遗留的身份与缓存（登出后站点没清干净）
-        clearAccount: function () {
+        clearAccount: function (explicitLogout) {
             var store = this.storeOf();
             if (!store) return;
             try { store.commit("deleteToken"); } catch (e) {}
@@ -381,7 +429,15 @@ if (typeof (loaded) == "undefined") {
                     st.cache = cache;
                 }
             } catch (e) {}
-            try { localStorage.removeItem("user"); } catch (e) {}
+            // 只有显式登出（或凭证确实已经不在了）才允许删持久化凭证。
+            // 自动兜底清理只负责清 Vuex 残留缓存，绝不能把有效登录删掉。
+            if (explicitLogout || !this.storedCredential()) {
+                try { localStorage.removeItem("user"); } catch (e) {}
+            }
+            // 显式登出：立刻丢弃备份，避免下次加载时被「还原」回来
+            if (explicitLogout) {
+                try { if (typeof GM.forgetCredential === "function") GM.forgetCredential(); } catch (e) {}
+            }
         },
         // 未登录时底部栏那一项是「去登陸」，改成「個人」并标记，点击时进个人页
         fixPersonalTab: function () {
@@ -466,7 +522,7 @@ if (typeof (loaded) == "undefined") {
                 var text = (e.target && e.target.innerText ? e.target.innerText : "").trim();
                 // 登出：让站点自己发请求，之后再兜底清一次（含 Vuex 缓存）
                 if (text.length <= 8 && self.LOGOUT_TEXTS.indexOf(text) >= 0) {
-                    setTimeout(function () { self.clearAccount(); }, 1500);
+                    setTimeout(function () { self.clearAccount(true); }, 1500);
                 }
                 // 1) 底部栏「去登陸」-> 个人页
                 // 注意：不能用 indexOf("van-tabbar-item")，它会先匹配到
