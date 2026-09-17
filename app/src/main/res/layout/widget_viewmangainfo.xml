@@ -16,7 +16,10 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <androidx.constraintlayout.widget.ConstraintLayout
+        <!-- 用 LinearLayout 而不是 ConstraintLayout：镜像日漫模式时只要翻 layoutDirection，
+             子项顺序会整体反过来；ConstraintLayout 的 start/end 约束在 RTL 下会互相引用，
+             SeekBar 会被压成 0 宽（既看不到也拖不动）。 -->
+        <LinearLayout
             android:id="@+id/infseekrow"
             android:layout_width="0dp"
             android:layout_height="24dp"
@@ -27,6 +30,8 @@
             android:layout_marginRight="8dp"
             android:alpha="0.8"
             android:background="@drawable/rndbg_white"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/inftitle">
@@ -34,23 +39,17 @@
             <SeekBar
                 android:id="@+id/infseek"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toStartOf="@+id/inftxtprogress"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent" />
+                android:layout_height="24dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1" />
 
             <TextView
                 android:id="@+id/inftxtprogress"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
-                android:text="@string/zero_per_zero"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toEndOf="@+id/infseek"
-                app:layout_constraintTop_toTopOf="parent" />
-        </androidx.constraintlayout.widget.ConstraintLayout>
+                android:text="@string/zero_per_zero" />
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/inchapternav"
@@ -72,12 +71,13 @@
                 android:layout_height="40dp"
                 android:layout_marginEnd="4dp"
                 android:layout_weight="1"
-                android:background="@drawable/reader_btn"
+                android:background="@drawable/reader_chip"
                 android:minHeight="0dp"
                 android:minWidth="0dp"
                 android:paddingStart="0dp"
                 android:paddingEnd="0dp"
                 android:text="@string/prev_chapter"
+                android:textColor="#DE000000"
                 android:textSize="13sp" />
 
             <Button
@@ -87,12 +87,13 @@
                 android:layout_marginStart="4dp"
                 android:layout_marginEnd="4dp"
                 android:layout_weight="1"
-                android:background="@drawable/reader_btn"
+                android:background="@drawable/reader_chip"
                 android:minHeight="0dp"
                 android:minWidth="0dp"
                 android:paddingStart="0dp"
                 android:paddingEnd="0dp"
                 android:text="@string/next_chapter"
+                android:textColor="#DE000000"
                 android:textSize="13sp" />
 
             <Button
@@ -100,12 +101,13 @@
                 android:layout_width="wrap_content"
                 android:layout_height="40dp"
                 android:layout_marginStart="4dp"
-                android:background="@drawable/reader_btn"
+                android:background="@drawable/reader_chip"
                 android:minHeight="0dp"
                 android:minWidth="0dp"
                 android:paddingStart="10dp"
                 android:paddingEnd="10dp"
                 android:text="@string/reader_invert_off"
+                android:textColor="#DE000000"
                 android:textSize="13sp" />
         </LinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>

@@ -62,7 +62,7 @@ class ReaderOverlayController(
         binding.infcard.apply {
             root.visibility = android.view.View.VISIBLE
             root.translationY = offset
-            ObjectAnimator.ofFloat(idc, "alpha", idc.alpha, 0.8f).setDuration(ANIMATION_DURATION_MS).start()
+            ObjectAnimator.ofFloat(idc, "alpha", idc.alpha, 0.92f).setDuration(ANIMATION_DURATION_MS).start()
             ObjectAnimator.ofFloat(root, "translationY", root.translationY, 0f).setDuration(ANIMATION_DURATION_MS).start()
         }
         drawerVisible = true

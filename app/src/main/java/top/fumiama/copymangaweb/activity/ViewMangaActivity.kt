@@ -4,6 +4,7 @@ import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.Drawable
@@ -13,8 +14,10 @@ import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.SeekBar
+import android.widget.TextView
 import android.widget.Toast
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -406,24 +409,37 @@ class ViewMangaActivity : ToolsBoxActivity() {
     private fun applyChapterNavOrder() {
         mBinding.oneinfo.btprevchapter.setText(if (r2l) R.string.next_chapter else R.string.prev_chapter)
         mBinding.oneinfo.btnextchapter.setText(if (r2l) R.string.prev_chapter else R.string.next_chapter)
-        // 日漫模式（从右往左）：进度条也要反过来——起始端在右、终止端在左，
-        // 数字仍按 LTR 显示，只是被放到另一侧
-        val dir = if (r2l) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
-        mBinding.oneinfo.infseekrow.layoutDirection = dir
-        mBinding.oneinfo.inftxtprogress.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        // 日漫模式（从右往左）：整行镜像——数字挪到左侧，进度条起始端落在右侧。
+        // 只翻行的 layoutDirection 就够了（行是 LinearLayout，子项顺序会整体反过来）；
+        // 曾经在 ConstraintLayout 上翻 layoutDirection，start/end 约束互相引用，
+        // SeekBar 被压成 0 宽，既看不到也拖不动。
+        mBinding.oneinfo.infseekrow.layoutDirection =
+            if (r2l) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
+        // SeekBar 自身的绘制/触摸固定 LTR，镜像交给 scaleX，免得依赖框架的 RTL 行为
+        mBinding.oneinfo.infseek.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        mBinding.oneinfo.infseek.scaleX = if (r2l) -1f else 1f
     }
 
     /**
      * 漫画的第一页/最后一页继续往外滑 -> 切换上一章/下一章。
-     * 只观察不拦截：正常翻页仍交给 ViewPager2，仅在边界上接管手势。
+     * 只观察不拦截：正常翻页仍交给 ViewPager2，仅在边界上真的往外滑时接管。
+     *
+     * 「向外」必须跟着阅读方向走：日漫模式（r2l）下 ViewPager2 是 RTL 排布的，
+     * 往后翻页的手指方向是向右，和 LTR 正好相反。写死 LTR 判据时，第一页的
+     * 「向后翻页」会被当成换章手势吞掉（末页对称地吞掉向前翻页）。
      */
     private fun installBoundarySwipe() {
         val rv = mBinding.vp.getChildAt(0) as? RecyclerView ?: return
         rv.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
             private var claimed = false
+            private var forwardDir = true
+            private var idleAtDown = true
             private var downX = 0f
             private var downY = 0f
             private var downItem = 0
+
+            /** 该手势方向是否代表「往后翻」（阅读方向上的下一页）。 */
+            private fun isForward(dx: Float) = if (r2l) dx > 0f else dx < 0f
 
             override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
                 when (e.actionMasked) {
@@ -431,19 +447,22 @@ class ViewMangaActivity : ToolsBoxActivity() {
                         downX = e.x
                         downY = e.y
                         downItem = mBinding.vp.currentItem
+                        // 翻页惯性还没停时别抢手势，否则会把页面停在半路
+                        idleAtDown = rv.scrollState == RecyclerView.SCROLL_STATE_IDLE
                         claimed = false
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        if (!claimed) {
+                        if (!claimed && idleAtDown && count > 0) {
                             val dx = e.x - downX
                             val dy = e.y - downY
-                            val out = when {
-                                dx < 0f -> downItem >= count - 1     // 已在最后一页还往左滑
-                                dx > 0f -> downItem <= 0             // 已在第一页还往右滑
-                                else -> false
-                            }
-                            if (out && abs(dx) > abs(dy) && abs(dx) > 24 * resources.displayMetrics.density) {
+                            val forward = isForward(dx)
+                            // 已在这一侧的端点、还继续往外滑才接管
+                            val atEdge = if (forward) downItem >= count - 1 else downItem <= 0
+                            if (atEdge && abs(dx) > abs(dy) &&
+                                abs(dx) > SWIPE_CLAIM_DP * resources.displayMetrics.density
+                            ) {
                                 claimed = true
+                                forwardDir = forward
                                 return true
                             }
                         }
@@ -455,10 +474,9 @@ class ViewMangaActivity : ToolsBoxActivity() {
             override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) {
                 when (e.actionMasked) {
                     MotionEvent.ACTION_UP -> {
-                        val dx = e.x - downX
-                        if (claimed && abs(dx) > mBinding.vp.width * 0.15f) {
-                            // 与翻页方向一致地越过边界：左滑=往后翻，右滑=往前翻
-                            gotoAdjacentChapter(dx < 0)
+                        if (claimed && abs(e.x - downX) > mBinding.vp.width * 0.15f) {
+                            // 越过边界的方向就是章节顺序：往后翻 -> 下一章
+                            gotoAdjacentChapter(forwardDir)
                         }
                         claimed = false
                     }
@@ -713,10 +731,47 @@ class ViewMangaActivity : ToolsBoxActivity() {
         mBinding.vp.setBackgroundColor(black)
         mBinding.continuousPages.setBackgroundColor(black)
         mBinding.oneinfo.infseekrow.setBackgroundResource(R.drawable.rndbg_dark)
+        mBinding.oneinfo.infseekrow.alpha = 1f      // 页数别再压透明度，夜间看不清
         mBinding.oneinfo.inftxtprogress.setTextColor(fg)
+        tintSeekBar(mBinding.oneinfo.infseek, fg)
         mBinding.oneinfo.inftitle.titlecard.setCardBackgroundColor(Color.parseColor("#1C1C1C"))
         mBinding.oneinfo.inftitle.ttitle.setTextColor(fg)
+        // 上栏按钮：换深色 chip + 浅色字。原来是 6% 黑的底配主题默认黑字，夜间糊成一片
+        for (b in listOf(
+            mBinding.oneinfo.btprevchapter,
+            mBinding.oneinfo.btnextchapter,
+            mBinding.oneinfo.btinvert
+        )) {
+            b.setTextColor(fg)
+            b.setBackgroundResource(R.drawable.reader_chip_dark)
+        }
+        // 下栏（设置抽屉）：文字全改浅色，按钮换与上栏同款的 chip
         mBinding.infcard.idc.setCardBackgroundColor(Color.parseColor("#1C1C1C"))
+        forEachTextView(mBinding.infcard.root) { it.setTextColor(fg) }
+        for (t in listOf(
+            mBinding.infcard.idtbvolturn,
+            mBinding.infcard.idtbvh,
+            mBinding.infcard.idtbvp,
+            mBinding.infcard.idtblr
+        )) {
+            t.setTextColor(fg)
+            t.setBackgroundResource(R.drawable.reader_chip_toggle_dark)
+        }
+        tintSeekBar(mBinding.infcard.idtoneseek, fg)
+        tintSeekBar(mBinding.infcard.idblackseek, fg)
+    }
+
+    /** 统一染色一棵视图树里的所有文字：抽屉里的标签没有 id，遍历比逐个加 id 更稳妥。 */
+    private fun forEachTextView(v: View, action: (TextView) -> Unit) {
+        if (v is TextView) action(v)
+        if (v is ViewGroup) for (i in 0 until v.childCount) forEachTextView(v.getChildAt(i), action)
+    }
+
+    /** 夜间把 SeekBar 的轨道/滑块调亮：默认配色在深色卡片上几乎看不见。 */
+    private fun tintSeekBar(sb: SeekBar, fg: Int) {
+        sb.progressTintList = ColorStateList.valueOf(fg)
+        sb.thumbTintList = ColorStateList.valueOf(fg)
+        sb.progressBackgroundTintList = ColorStateList.valueOf(0xFF3A3A3A.toInt())
     }
 
     /** 上一次读到的位置：同一章直接回到该页。 */
@@ -1190,6 +1245,9 @@ class ViewMangaActivity : ToolsBoxActivity() {
     companion object {
         const val FIRST_PAGE = -1
         const val LAST_PAGE = -2
+
+        /** 边界滑动接管手势的最小横向位移（dp） */
+        private const val SWIPE_CLAIM_DP = 24
 
         var va: WeakReference<ViewMangaActivity>? = null
         var imgUrls = arrayOf<String>()
