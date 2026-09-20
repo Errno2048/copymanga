@@ -312,7 +312,7 @@ if (typeof (loaded) == "undefined") {
                 if (self.isSettingUrl(url)) self.installSettingRows();
                 if (self.isNovelDetailUrl(url)) {
                     self.loadNovelBook();
-                    self.installNovelDownloadButton();
+                    self.installNovelFab();
                 }
                 self.collectComicMeta();
                 self.installNoticeObserver();
@@ -651,8 +651,6 @@ if (typeof (loaded) == "undefined") {
             var self = this;
             var book = self.novelBook;
             if (!book) { self.loadNovelBook(function () { self.downloadNovel(); }); return; }
-            var st = document.getElementById("cm-novel-dl-state");
-            if (st) st.textContent = "已提交";
             var req = {
                 pathWord: book.pathWord, name: book.name, apiBase: book.apiBase,
                 cover: book.cover || "", author: book.author || "",
@@ -923,23 +921,29 @@ if (typeof (loaded) == "undefined") {
             } catch (e) {}
         },
 
-        installNovelDownloadButton: function () {
-            if (document.getElementById("cm-novel-dl")) return;
-            var host = document.querySelector("main") || document.body;
-            if (!host) return;
+        /**
+         * 小说详情页的下载入口：与漫画完全一致，走原生侧边 FAB -> 原生下载页。
+         * （原来往 <main> 里插一条 cell 会把整页顶下去，页面高度不跟着调，
+         *   内容刚好一屏时底部就看不到了；侧边按钮不占布局。）
+         */
+        installNovelFab: function () {
             var self = this;
-            var wrap = document.createElement("div");
-            wrap.className = "van-cell-group";
-            wrap.innerHTML = '<div class="van-cell" id="cm-novel-dl">'
-                + '<div class="van-cell__title"><span>下载整本小说</span></div>'
-                + '<div class="van-cell__value"><span id="cm-novel-dl-state"></span></div></div>';
-            wrap.addEventListener("click", function (e) {
-                e.stopPropagation();
-                e.preventDefault();
-                self.downloadNovel();
-            });
-            host.insertBefore(wrap, host.firstChild);
-            self.applyNight();
+            if (!self.isNovelDetailUrl(location.href)) return;
+            var book = self.novelBook;
+            if (!book || !book.volumes || !book.volumes.length) return;
+            if (self.novelFabSent === book.pathWord) return;
+            self.novelFabSent = book.pathWord;
+            try {
+                GM.setNovelFab(JSON.stringify({
+                    pathWord: book.pathWord,
+                    name: book.name,
+                    apiBase: book.apiBase,
+                    cover: book.cover || "",
+                    author: book.author || "",
+                    volumes: book.volumes,
+                    volume: null
+                }));
+            } catch (e) {}
         },
         // 卷列表按 DOM 顺序与接口顺序一一对应；点击卷一律交给原生阅读器
         installNovelVolumeHook: function () {
@@ -1249,19 +1253,58 @@ if (typeof (loaded) == "undefined") {
          *   隐藏遮罩与弹窗后**代点确认按钮**——只隐藏不点，遮罩会留着挡住操作，站点状态也不会复位；
          * - 轻提示（van-toast / van-notify）：只在文案命中网络关键词时隐藏，不误伤「收藏成功」这类正常提示。
          */
+        /**
+         * 「不显示」一律用这个类，不要用 display:none ——
+         * display:none 会让 Vant 的离场过渡直接中断，它内部状态卡在“打开”，
+         * 之后路由切换时遮罩会被重新显示出来（表现为返回后一层点不动的深色遮罩）。
+         */
+        noticeHiddenClass: "cm-notice-hidden",
+        noticeMaskClass: "cm-notice-mask-off",
+        installNoticeStyle: function () {
+            if (document.getElementById("cm-notice-style")) return;
+            var s = document.createElement("style");
+            s.id = "cm-notice-style";
+            s.textContent =
+                ".cm-notice-hidden{opacity:0 !important;pointer-events:none !important;}" +
+                "body." + this.noticeMaskClass + " .van-overlay," +
+                "body." + this.noticeMaskClass + " .van-popup__overlay" +
+                "{opacity:0 !important;pointer-events:none !important;}";
+            (document.head || document.documentElement).appendChild(s);
+        },
+        isShown: function (el) {
+            if (!el) return false;
+            var cs = getComputedStyle(el);
+            return cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0";
+        },
+        hideNotice: function (el) {
+            if (el) el.classList.add(this.noticeHiddenClass);
+        },
+        setMaskOff: function (off) {
+            var b = document.body;
+            if (!b) return;
+            if (off) b.classList.add(this.noticeMaskClass);
+            else b.classList.remove(this.noticeMaskClass);
+            // 遮罩常伴的滚动锁也一起放掉，否则页面滚不动
+            if (off) {
+                b.classList.remove("van-overflow-hidden");
+                if (document.documentElement) {
+                    document.documentElement.classList.remove("van-overflow-hidden");
+                }
+            }
+        },
         installNoticeFilter: function () {
             var self = this;
+            self.installNoticeStyle();
             var hideOverlays = function () {
-                var ov = document.querySelectorAll(".van-overlay, .van-popup__overlay");
-                for (var k = 0; k < ov.length; k++) {
-                    if (ov[k].style.display !== "none") ov[k].style.display = "none";
-                }
+                self.setMaskOff(true);
             };
             // 1) 进入时的系统公告弹窗（有固定 id）
+            var anyNotice = false;
             var sys = document.getElementById("systemConfirm");
-            if (sys && sys.style.display !== "none") {
+            if (sys && self.isShown(sys)) {
+                anyNotice = true;
                 hideOverlays();
-                sys.style.display = "none";
+                self.hideNotice(sys);
                 var sb = sys.querySelector("button, a");
                 if (sb && !sb.__cmNoticeClicked) {
                     sb.__cmNoticeClicked = true;
@@ -1272,11 +1315,12 @@ if (typeof (loaded) == "undefined") {
             var dlg = document.querySelectorAll(".van-dialog");
             for (var i = 0; i < dlg.length; i++) {
                 var d = dlg[i];
-                if (d.style.display === "none") continue;
+                if (!self.isShown(d)) continue;
                 var t = (d.innerText || d.textContent || "").trim();
                 if (!t || !self.noticeDialogRe.test(t)) continue;
+                anyNotice = true;
                 hideOverlays();
-                d.style.display = "none";
+                self.hideNotice(d);
                 var b = d.querySelector("button, a");
                 if (b && !b.__cmNoticeClicked) {
                     b.__cmNoticeClicked = true;
@@ -1287,10 +1331,36 @@ if (typeof (loaded) == "undefined") {
             var toasts = document.querySelectorAll(".van-toast, .van-notify");
             for (var j = 0; j < toasts.length; j++) {
                 var el = toasts[j];
-                if (el.style.display === "none") continue;
+                if (!self.isShown(el)) continue;
                 var txt = (el.innerText || el.textContent || "").trim();
-                if (txt && self.noticeToastRe.test(txt)) el.style.display = "none";
+                if (txt && self.noticeToastRe.test(txt)) {
+                    anyNotice = true;
+                    self.hideNotice(el);
+                }
             }
+            // 孤儿遮罩兜底：没有任何可见弹层时，仍可见的遮罩一律收掉。
+            // 站点的弹窗被我们关掉后，Vant 有时会把遮罩留在“打开”状态并在路由切换时重新显示，
+            // 表现为返回后整页被一层深色遮罩挡住、点什么都没反应。
+            if (self.anyPopupShown()) { self.setMaskOff(false); return; }
+            if (anyNotice) return;                  // 本轮的遮罩由上面的分支处理
+            var ovs = document.querySelectorAll(".van-overlay, .van-popup__overlay");
+            var orphan = false;
+            for (var k = 0; k < ovs.length; k++) {
+                if (self.isShown(ovs[k])) { orphan = true; break; }
+            }
+            if (orphan) self.setMaskOff(true);
+            else self.setMaskOff(false);
+        },
+        /** 有没有“正当”的可见弹层（站内菜单、下拉、图片预览等）——有就别动遮罩 */
+        anyPopupShown: function () {
+            var self = this;
+            var sel = ".van-dialog,.van-popup,.van-action-sheet,.van-image-preview," +
+                ".van-dropdown-item,.van-notify,.van-picker,.van-share-sheet";
+            var els = document.querySelectorAll(sel);
+            for (var i = 0; i < els.length; i++) {
+                if (self.isShown(els[i])) return true;
+            }
+            return false;
         },
         /**
          * 弹窗/提示是随时冒出来的，定时兜底最快也要等 ~800ms（会闪一下）。

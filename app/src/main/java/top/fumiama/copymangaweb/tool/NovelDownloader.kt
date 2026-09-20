@@ -46,18 +46,7 @@ object NovelDownloader {
                     return@Thread
                 }
                 meta.volumes.forEachIndexed { i, info ->
-                    val vol = meta.details[info.id]
-                        ?: NovelApi.volumeDetail(apiBase, meta.pathWord, info.id)
-                            ?.also { meta.details[info.id] = it }
-                    if (vol != null && vol.txtAddr.isNotBlank()) {
-                        val dest = NovelStore.txtFile(ctx, meta.name, vol.name)
-                        if (dest.exists() || NovelApi.downloadBinary(vol.txtAddr, dest)) ok++
-                        // 插图单独存放（正文 txt 里没有图片，必须一起下）
-                        vol.chapters.filter { it.isImage && it.imageUrl.isNotBlank() }.forEach { ch ->
-                            val img = NovelStore.imageFile(ctx, meta.name, vol.name, ch)
-                            if (!img.exists()) NovelApi.downloadBinary(ch.imageUrl, img)
-                        }
-                    }
+                    if (downloadVolume(ctx, meta, info)) ok++
                     NovelStore.save(ctx, meta)
                     toast(ctx, "小说下载中 ${i + 1}/$total")
                 }
@@ -68,6 +57,31 @@ object NovelDownloader {
             }
             toast(ctx, "小说下载完成：$ok/$total 卷")
         }.start()
+    }
+
+    /**
+     * 下载一卷：正文 txt + 插图（+ 顺手补一次封面）。已存在的文件跳过。
+     * 返回正文是否就绪。供「整本下载」与小说下载页（勾选若干卷）共用。
+     */
+    fun downloadVolume(ctx: Context, meta: NovelBookMeta, info: NovelVolumeInfo): Boolean {
+        val apiBase = meta.apiBase
+        val vol = meta.details[info.id]
+            ?: NovelApi.volumeDetail(apiBase, meta.pathWord, info.id)
+                ?.also { meta.details[info.id] = it }
+            ?: return false
+        if (vol.txtAddr.isBlank()) return false
+        val dest = NovelStore.txtFile(ctx, meta.name, vol.name)
+        val ready = dest.exists() || NovelApi.downloadBinary(vol.txtAddr, dest)
+        // 插图单独存放（正文 txt 里没有图片，必须一起下）
+        vol.chapters.filter { it.isImage && it.imageUrl.isNotBlank() }.forEach { ch ->
+            val img = NovelStore.imageFile(ctx, meta.name, vol.name, ch)
+            if (!img.exists()) NovelApi.downloadBinary(ch.imageUrl, img)
+        }
+        if (meta.cover.isNotBlank()) {
+            val cover = NovelStore.coverFile(ctx, meta.name)
+            if (!cover.exists() || cover.length() == 0L) NovelApi.downloadBinary(meta.cover, cover)
+        }
+        return ready
     }
 
     private fun toast(ctx: Context, msg: String) {

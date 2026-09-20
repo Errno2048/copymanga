@@ -30,5 +30,6 @@
         <activity android:name=".activity.DlActivity"/>
         <activity android:name=".activity.DlListActivity"/>
         <activity android:name=".activity.ViewNovelActivity"/>
+        <activity android:name=".activity.NovelDlActivity"/>
     </application>
 </manifest>

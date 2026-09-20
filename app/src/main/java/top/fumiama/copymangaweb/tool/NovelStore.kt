@@ -86,6 +86,25 @@ object NovelStore {
         return File(dir(ctx, name), sanitize("${volumeName}__${chapter.name}") + "." + ext)
     }
 
+    /** 该卷正文是否已在本地 */
+    fun isVolumeDownloaded(ctx: Context, name: String, volumeName: String): Boolean {
+        val f = txtFile(ctx, name, volumeName)
+        return f.exists() && f.length() > 0
+    }
+
+    /** 本地已有的卷数（「我的下载」据此判断这本书是否真的下载过） */
+    fun downloadedVolumeCount(ctx: Context, name: String): Int =
+        load(ctx, name)?.volumes?.count { isVolumeDownloaded(ctx, name, it.name) } ?: 0
+
+    /** 删除一卷的本地内容：正文 txt + 该卷的插图（插图文件名是 <卷名>__<条目名>.<ext>） */
+    fun deleteVolume(ctx: Context, name: String, volumeName: String) {
+        runCatching { txtFile(ctx, name, volumeName).delete() }
+        val prefix = sanitize(volumeName) + "__"
+        dir(ctx, name).listFiles()?.forEach { f ->
+            if (f.isFile && f.name.startsWith(prefix)) f.delete()
+        }
+    }
+
     /** 封面文件：<书名>/cover.jpg（下载时落盘，已存在则不重下） */
     fun coverFile(ctx: Context, name: String): File = File(dir(ctx, name), "cover.jpg")
 

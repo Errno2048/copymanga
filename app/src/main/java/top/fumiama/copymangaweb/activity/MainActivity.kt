@@ -17,6 +17,8 @@ import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.lifecycle.lifecycleScope
 import top.fumiama.copymangaweb.tool.ComicMetaStore
+import top.fumiama.copymangaweb.tool.NovelOpenRequest
+import top.fumiama.copymangaweb.tool.NovelStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,6 +48,8 @@ class MainActivity: ToolsBoxActivity() {
     private var backInvokedCallback: OnBackInvokedCallback? = null
     @Volatile
     private var requestedDetailsUrl: String? = null
+    /** FAB 点开哪个页面：漫画章节下载页 / 小说下载页 / 我的下载 */
+    private var fabKind = FAB_COMIC
 
     @SuppressLint("JavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -232,6 +236,7 @@ class MainActivity: ToolsBoxActivity() {
                 ?.let { JS.rememberComicName(this, it, comicTitle) }
         }
         json = content
+        fabKind = FAB_COMIC
         lifecycleScope.launch {
             withContext(Dispatchers.Main) {
                 mViewModel.showDlList.value = false
@@ -242,6 +247,7 @@ class MainActivity: ToolsBoxActivity() {
 
     fun setFab2DlList() {
         requestedDetailsUrl = null
+        fabKind = FAB_DLLIST
         lifecycleScope.launch {
             withContext(Dispatchers.Main) {
                 mViewModel.showDlList.value = true
@@ -267,10 +273,32 @@ class MainActivity: ToolsBoxActivity() {
 
     fun onFabClicked(v: View) {
         DlListActivity.currentDir = getExternalFilesDir("")
-        startActivity(
-            Intent(this, (if(mViewModel.showDlList.value == true) DlListActivity::class else DlActivity::class).java)
-                .putExtra("title", "我的下载")
-        )
+        val target = when (fabKind) {
+            FAB_NOVEL -> NovelDlActivity::class.java
+            FAB_DLLIST -> DlListActivity::class.java
+            else -> DlActivity::class.java
+        }
+        startActivity(Intent(this, target).putExtra("title", "我的下载"))
+    }
+
+    /**
+     * 小说详情页的下载按钮（i.js 回传元信息）：与漫画完全一致 ——
+     * 侧边同一个 FAB，点进去是原生下载页（可选择下载/删除若干卷）。
+     */
+    fun setNovelFab(metaJson: String) {
+        val req = runCatching {
+            NovelStore.gson().fromJson(metaJson, NovelOpenRequest::class.java)
+        }.getOrNull() ?: return
+        if (req.name.isBlank()) return
+        NovelStore.merge(this, req)
+        NovelDlActivity.bookNameArg = req.name
+        fabKind = FAB_NOVEL
+        lifecycleScope.launch {
+            withContext(Dispatchers.Main) {
+                mViewModel.showDlList.value = false
+                mViewModel.setFabVisibility(true)
+            }
+        }
     }
 
     fun openImageChooserActivity(callback: ValueCallback<Array<Uri>>) {
@@ -399,6 +427,10 @@ class MainActivity: ToolsBoxActivity() {
     companion object {
         /** 由 JS 桥传入：新实例直接加载这个 URL（用于「详情页另开一页」）。 */
         const val EXTRA_START_URL = "start_url"
+        /** FAB 点开哪个页面 */
+        const val FAB_COMIC = 0
+        const val FAB_NOVEL = 1
+        const val FAB_DLLIST = 2
         /** 被淘汰后重建时传入要恢复的滚动位置。 */
         const val EXTRA_SCROLL_HINT = "scroll_hint"
         private const val FILE_CHOOSER_RESULT_CODE = 1

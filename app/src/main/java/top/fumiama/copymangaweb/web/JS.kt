@@ -87,6 +87,12 @@ class JS {
         const val INVERT_GAIN_KEY = "invert_gain"
         const val INVERT_BLACK_KEY = "invert_black"
     }
+    /** 小说详情页的下载入口（侧边 FAB，与漫画一致） */
+    @JavascriptInterface
+    fun setNovelFab(metaJson: String) {
+        wm?.get()?.setNovelFab(metaJson)
+    }
+
     /**
      * 漫画元信息（封面 / 作者 / 分类）：页面侧在详情页抓好后传进来。
      * 本地已有该漫画目录时顺手补写 meta.json 并补下封面，老下载也能被补全。

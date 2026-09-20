@@ -125,12 +125,16 @@ class DlListActivity : Activity() {
         if (novelMeta.exists()) {
             if (kind != TYPE_NOVEL) return null
             val m = NovelStore.load(this, dir.name)
+            // 只是浏览过详情页（merge 会落一份 novel.json）不算“已下载”，要真有一卷正文
+            val done = NovelStore.downloadedVolumeCount(this, dir.name)
+            if (done == 0) return null
+            val total = m?.volumes?.size ?: 0
             val author = m?.author.orEmpty()
             val cover = NovelStore.coverFile(this, dir.name)
             return Entry(
                 TYPE_NOVEL, dir,
                 m?.name?.ifBlank { dir.name } ?: dir.name,
-                author.ifBlank { "${m?.volumes?.size ?: 0} 卷" },
+                if (author.isBlank()) "$done/$total 卷" else "$author · $done/$total 卷",
                 cover.takeIf { it.exists() && it.length() > 0 }, m?.cover.orEmpty(),
                 m?.volumes?.size ?: 0
             )
@@ -238,7 +242,7 @@ class DlListActivity : Activity() {
     }
 
     private fun confirmDelete(e: Entry) {
-        AlertDialog.Builder(this)
+        val builder = AlertDialog.Builder(this)
             .setIcon(R.drawable.ic_launcher_foreground)
             .setTitle(e.title)
             .setMessage("在此执行删除/查错?")
@@ -249,8 +253,18 @@ class DlListActivity : Activity() {
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
-            .setNeutralButton("查错") { _, _ -> checkDirectory(e.dir) }
-            .show()
+        if (e.kind == TYPE_NOVEL) {
+            builder.setNeutralButton(R.string.ndl_manage) { _, _ -> openNovelDownload(e.dir.name) }
+        } else {
+            builder.setNeutralButton("查错") { _, _ -> checkDirectory(e.dir) }
+        }
+        builder.show()
+    }
+
+    /** 从「我的下载」进入下载管理：小说进小说下载页 */
+    private fun openNovelDownload(bookName: String) {
+        NovelDlActivity.bookNameArg = bookName
+        startActivity(Intent(this, NovelDlActivity::class.java).putExtra("title", bookName))
     }
 
     private fun deleteRecursively(f: File) {
