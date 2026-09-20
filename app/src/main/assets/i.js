@@ -315,6 +315,7 @@ if (typeof (loaded) == "undefined") {
                     self.installNovelDownloadButton();
                 }
                 self.collectComicMeta();
+                self.installNoticeObserver();
                 self.installNoticeFilter();
                 self.installContinueButton();
                 self.watchLogin();
@@ -1240,26 +1241,83 @@ if (typeof (loaded) == "undefined") {
          *    不需要再弹一次提示。
          */
         noticeToastRe: /超时|超時|逾時|timeout|连接失败|連接失敗|連線失敗|网络异常|網路異常|网络错误|網路錯誤|网络连接|網路連接|无法连接|無法連接|请求失败|請求失敗|请求异常|請求異常|加载失败|載入失敗|重新连接|重新連接|重新加载|重新載入|服务器错误|服務器錯誤|请检查网络|請檢查網絡|网络不佳|網路不佳/i,
+        // 网络类「弹窗」的文案（站点的连接超时提示：系統提示 / 【連接超時】-客官請【下拉】頁面刷新）
+        noticeDialogRe: /超時|超时|逾時|timeout|連接失敗|连接失败|連線失敗|网络异常|網路異常|网络错误|網路錯誤|伺服器|服务器|下拉[^。]{0,8}刷新|請[^。]{0,8}刷新/i,
+        /**
+         * 站点的打扰有两类，都要处理：
+         * - 弹窗（van-dialog）：进入时的系统公告、以及网络不好时的「【連接超時】-客官請【下拉】頁面刷新」。
+         *   隐藏遮罩与弹窗后**代点确认按钮**——只隐藏不点，遮罩会留着挡住操作，站点状态也不会复位；
+         * - 轻提示（van-toast / van-notify）：只在文案命中网络关键词时隐藏，不误伤「收藏成功」这类正常提示。
+         */
         installNoticeFilter: function () {
             var self = this;
-            var dlg = document.getElementById("systemConfirm");
-            if (dlg) {
-                var ov = document.querySelector(".van-overlay");
-                if (ov) ov.style.display = "none";
-                dlg.style.display = "none";
-                var btn = dlg.querySelector("button, a");
-                if (btn && !btn.__cmNoticeClicked) {
-                    btn.__cmNoticeClicked = true;
-                    try { btn.click(); } catch (e) {}
+            var hideOverlays = function () {
+                var ov = document.querySelectorAll(".van-overlay, .van-popup__overlay");
+                for (var k = 0; k < ov.length; k++) {
+                    if (ov[k].style.display !== "none") ov[k].style.display = "none";
+                }
+            };
+            // 1) 进入时的系统公告弹窗（有固定 id）
+            var sys = document.getElementById("systemConfirm");
+            if (sys && sys.style.display !== "none") {
+                hideOverlays();
+                sys.style.display = "none";
+                var sb = sys.querySelector("button, a");
+                if (sb && !sb.__cmNoticeClicked) {
+                    sb.__cmNoticeClicked = true;
+                    try { sb.click(); } catch (e) {}
                 }
             }
-            var toasts = document.querySelectorAll(".van-toast");
-            for (var i = 0; i < toasts.length; i++) {
-                var t = toasts[i];
-                if (t.style.display === "none") continue;
-                var txt = (t.innerText || t.textContent || "").trim();
-                if (txt && self.noticeToastRe.test(txt)) t.style.display = "none";
+            // 2) 网络类弹窗：按文案匹配（连接超时等）
+            var dlg = document.querySelectorAll(".van-dialog");
+            for (var i = 0; i < dlg.length; i++) {
+                var d = dlg[i];
+                if (d.style.display === "none") continue;
+                var t = (d.innerText || d.textContent || "").trim();
+                if (!t || !self.noticeDialogRe.test(t)) continue;
+                hideOverlays();
+                d.style.display = "none";
+                var b = d.querySelector("button, a");
+                if (b && !b.__cmNoticeClicked) {
+                    b.__cmNoticeClicked = true;
+                    try { b.click(); } catch (e) {}
+                }
             }
+            // 3) 网络类轻提示
+            var toasts = document.querySelectorAll(".van-toast, .van-notify");
+            for (var j = 0; j < toasts.length; j++) {
+                var el = toasts[j];
+                if (el.style.display === "none") continue;
+                var txt = (el.innerText || el.textContent || "").trim();
+                if (txt && self.noticeToastRe.test(txt)) el.style.display = "none";
+            }
+        },
+        /**
+         * 弹窗/提示是随时冒出来的，定时兜底最快也要等 ~800ms（会闪一下）。
+         * 监听 body 上新增的相关节点，一出现就立刻处理。
+         */
+        installNoticeObserver: function () {
+            var self = this;
+            if (this.noticeObserver || typeof MutationObserver === "undefined") return;
+            if (!document.body) return;
+            try {
+                this.noticeObserver = new MutationObserver(function (list) {
+                    for (var i = 0; i < list.length; i++) {
+                        var added = list[i].addedNodes;
+                        for (var j = 0; j < added.length; j++) {
+                            var n = added[j];
+                            if (!n || n.nodeType !== 1) continue;
+                            var cls = String(n.className || "");
+                            if (cls.indexOf("van-dialog") >= 0 || cls.indexOf("van-toast") >= 0 ||
+                                cls.indexOf("van-notify") >= 0 || cls.indexOf("van-overlay") >= 0) {
+                                self.installNoticeFilter();
+                                return;
+                            }
+                        }
+                    }
+                });
+                this.noticeObserver.observe(document.body, { childList: true, subtree: true });
+            } catch (e) {}
         },
         // 兜底：若路由守卫未生效（例如老版本无 loadComicDirect），仍在内容页拉起阅读器。
         loadChapter: function () {
@@ -1305,7 +1363,8 @@ if (typeof (loaded) == "undefined") {
     invoke.urlChangeListener(modify);
     setTimeout(function () { invoke.installRouterGuard(); invoke.allowNovel(); }, 800);
     invoke.applyNight();
-    // 公告弹窗要尽早挡住：启动后 7 秒内密集检查，之后交给定时兜底
+    // 公告/网络弹窗要尽早挡住：先装节点监听，再在启动后 7 秒内密集兜底
+    try { invoke.installNoticeObserver(); } catch (e) {}
     (function () {
         var n = 0;
         var t = setInterval(function () {
