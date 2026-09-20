@@ -3,6 +3,7 @@ package top.fumiama.copymangaweb.tool
 import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
+import top.fumiama.copymangaweb.web.JS
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -75,14 +76,40 @@ object ComicMetaStore {
         }
         prefs(ctx).edit().putString(PREFIX + mine.pathWord, gson.toJson(mine)).apply()
         // 已下载的漫画：补写 meta.json + 封面（已存在就不重下）
-        val dir = ctx.getExternalFilesDir("")?.let { root ->
-            root.listFiles()?.firstOrNull { it.isDirectory && it.name == mine.name }
-        }
+        val dir = findLocalDir(ctx, mine)
         if (dir != null) {
             writeInto(dir, mine)
             ensureCover(dir, mine)
         }
-        Log.d("ComicMeta", "remember ${mine.pathWord} name=${mine.name} cover=${mine.cover}")
+        Log.d(
+            "ComicMeta",
+            "remember ${mine.pathWord} name=${mine.name} author=${mine.author} cover=${mine.cover}"
+        )
+    }
+
+    /**
+     * 找这个 pathWord 对应的本地漫画目录：
+     * 1) 下载时记下的 pathWord -> 漫画名 映射最可靠（下载页会用这个映射）；
+     * 2) 其次按名字完全一致找；
+     * 3) 最后退一步：目录名与漫画名互相包含（PC 端与手机端标题偶有细微差异）。
+     */
+    private fun findLocalDir(ctx: Context, meta: ComicMeta): File? {
+        val root = ctx.getExternalFilesDir("") ?: return null
+        val dirs = root.listFiles()?.filter { it.isDirectory }.orEmpty()
+        val mapped = ctx.getSharedPreferences(JS.NIGHT_PREF, Context.MODE_PRIVATE)
+            .getString(JS.COMIC_NAME_PREFIX + meta.pathWord, null)
+        if (!mapped.isNullOrBlank()) {
+            dirs.firstOrNull { it.name == mapped }?.let { return it }
+        }
+        if (meta.name.isNotBlank()) {
+            dirs.firstOrNull { it.name == meta.name }?.let { return it }
+            val short = meta.name.take(6)
+            if (short.length >= 4) {
+                dirs.firstOrNull { it.name.contains(short) || meta.name.contains(it.name) }
+                    ?.let { return it }
+            }
+        }
+        return null
     }
 
     /** 下载封面到 `<漫画目录>/cover.jpg`（已存在则跳过）。 */

@@ -1116,7 +1116,45 @@ if (typeof (loaded) == "undefined") {
             }
             if (!host) host = "https://s3.mangafunb.fun";
             c = c.replace(/\.\d+x\d+\.(jpg|jpeg|png|webp)$/i, "").replace(/^\/+/, "");
-            return host + "/book/" + c;
+            // 站点里的 cover 字段就是相对图片 CDN 根目录的路径（如 <pathWord>/cover/xxx.jpg）
+            return host + "/" + c;
+        },
+        /** 详情页的 pathWord（路由是 /details/comic/<pathWord>，兼容两段写法） */
+        detailPathWord: function () {
+            var m = location.pathname.match(/\/details\/comic\/(?:[^\/]+\/)?([A-Za-z0-9_-]+)/);
+            return m ? m[1] : "";
+        },
+        /**
+         * 从详情页头部 DOM 取元信息：网络不好时详情接口可能失败（store 里没有数据），
+         * 但页面头部的标题 / 封面 / 作者照样渲染出来了，所以 DOM 是更可靠的一手来源。
+         */
+        detailMetaFromDom: function (pw) {
+            var out = { name: "", cover: "", author: "" };
+            var root = document.querySelector(".headerContent") || document;
+            var t = root.querySelector(".headerContentTitle");
+            if (t) out.name = (t.innerText || t.textContent || "").trim();
+            var img = root.querySelector(".headerContentImage img");
+            if (img) out.cover = (img.currentSrc || img.src || "").trim();
+            if (!out.cover && pw) out.cover = this.coverFromDom(pw);
+            var item = root.querySelector(".headerContentTextItem.author");
+            if (item) {
+                var node = item.querySelector("p") || item;
+                var parts = [];
+                var kids = node.children;
+                if (kids && kids.length) {
+                    for (var i = 0; i < kids.length; i++) {
+                        var s = (kids[i].innerText || kids[i].textContent || "").trim();
+                        if (s) parts.push(s);
+                    }
+                } else {
+                    var one = (node.innerText || node.textContent || "")
+                        .replace(/^作者[:：]?/, "").trim();
+                    if (one) parts.push(one);
+                }
+                out.author = parts.join(" / ");
+            }
+            if (out.cover) out.cover = out.cover.replace(/\.\d+x\d+\.(jpg|jpeg|png|webp)$/i, "");
+            return out;
         },
         authorTextOf: function (a) {
             if (!a) return "";
@@ -1159,23 +1197,37 @@ if (typeof (loaded) == "undefined") {
          * 每个 pathWord 只报一次；拿不到封面就不报，避免存下空元信息。
          */
         collectComicMeta: function () {
-            var m = location.pathname.match(/\/details\/comic\/([^\/]+)\/([A-Za-z0-9_-]+)/);
+            // 详情页路由是 /details/comic/<pathWord>（单段）；兼容历史上出现过的
+            // /details/comic/<type>/<pathWord> 两段写法
+            var m = location.pathname.match(/\/details\/comic\/(?:[^\/]+\/)?([A-Za-z0-9_-]+)/);
             if (!m) return;
-            var pw = m[2];
-            if (this.comicMetaSent[pw]) return;
+            var pw = m[1];
+            // 详情页数据是异步到的：先只有封面（DOM 渲染出来就有），名字/作者要等接口回来。
+            // 因此报过不等于报全，缺项就继续重试，直到齐全或超过尝试上限。
+            var st = this.comicMetaSent[pw] || { n: 0, done: false };
+            if (st.done) return;
+            var dom = this.detailMetaFromDom(pw);
             var info = this.findComicInfo(pw) || {};
-            var name = info.name || "";
+            var name = dom.name || info.name || "";
             if (!name) {
+                // 详情页的 document.title 只是「詳情」这类通用标题，不能当名字用
                 var h = document.getElementsByTagName("h6")[0];
-                name = (h && (h.title || h.innerText)) || (document.title || "").split(/[-|]/)[0].trim();
+                var t = (h && (h.title || h.innerText)) || "";
+                if (!t) {
+                    var dt = (document.title || "").trim();
+                    t = /^(詳情|详情|拷貝漫畫|拷贝漫画|comic|novel)$/i.test(dt) ? "" : dt.split(/[-|]/)[0].trim();
+                }
+                name = t;
             }
-            var cover = this.coverFromDom(pw) || this.coverUrlOf(info.cover);
-            var author = this.authorTextOf(info.author);
-            if (!cover && !name) return;
-            this.comicMetaSent[pw] = 1;
+            var cover = dom.cover || this.coverUrlOf(info.cover);
+            var author = dom.author || this.authorTextOf(info.author);
+            if (!name && !cover) return;
+            st.n++;
+            if ((name && cover) || st.n >= 40) st.done = true;
+            this.comicMetaSent[pw] = st;
             try {
                 GM.rememberComicMeta(JSON.stringify({
-                    pathWord: pw, type: m[1], name: name, cover: cover, author: author
+                    pathWord: pw, name: name, cover: cover, author: author
                 }));
             } catch (e) {}
         },
