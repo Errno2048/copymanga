@@ -8,6 +8,7 @@ import top.fumiama.copymangaweb.activity.MainActivity
 import top.fumiama.copymangaweb.activity.MainActivity.Companion.wm
 import top.fumiama.copymangaweb.activity.ViewMangaActivity
 import top.fumiama.copymangaweb.activity.ViewNovelActivity
+import top.fumiama.copymangaweb.tool.ComicMetaStore
 import top.fumiama.copymangaweb.tool.NovelDownloader
 import top.fumiama.copymangaweb.tool.ReadingProgress
 import java.io.File
@@ -86,6 +87,16 @@ class JS {
         const val INVERT_GAIN_KEY = "invert_gain"
         const val INVERT_BLACK_KEY = "invert_black"
     }
+    /**
+     * 漫画元信息（封面 / 作者 / 分类）：页面侧在详情页抓好后传进来。
+     * 本地已有该漫画目录时顺手补写 meta.json 并补下封面，老下载也能被补全。
+     */
+    @JavascriptInterface
+    fun rememberComicMeta(json: String) {
+        val ctx = wm?.get() ?: return
+        ComicMetaStore.remember(ctx, json)
+    }
+
     // ---------- 小说 ----------
 
     /** 打开原生小说阅读器。metaJson 由页面侧（i.js）从站点接口取好后传入。 */

@@ -19,6 +19,8 @@ import top.fumiama.copymangaweb.activity.template.ToolsBoxActivity
 import top.fumiama.copymangaweb.data.ComicStructure
 import top.fumiama.copymangaweb.databinding.ActivityDlBinding
 import top.fumiama.copymangaweb.handler.DlHandler
+import top.fumiama.copymangaweb.tool.ComicMeta
+import top.fumiama.copymangaweb.tool.ComicMetaStore
 import top.fumiama.copymangaweb.tool.InsetsTools
 import top.fumiama.copymangaweb.tool.MangaDlTools
 import top.fumiama.copymangaweb.tool.NightTint
@@ -246,6 +248,17 @@ class DlActivity : ToolsBoxActivity() {
         val jsonFile = File(mangaHome, "info.bin")
         if(!mangaHome.exists()) mangaHome.mkdirs()
         if(!(jsonFile.exists() && intent.getBooleanExtra("callFromDlList", false))) json?.let { jsonFile.writeText(it) }
+        // 元信息 + 封面：下载任意章节时顺手保存一次（已有则不重下）
+        val meta = runCatching {
+            comicMetaJson.takeIf { it.isNotBlank() }?.let {
+                Gson().fromJson(it, ComicMeta::class.java)
+            }
+        }.getOrNull() ?: ComicMetaStore.readFromDir(mangaHome)
+        if (meta != null) {
+            if (meta.name.isBlank()) meta.name = comicName
+            ComicMetaStore.writeInto(mangaHome, meta)
+            ComicMetaStore.ensureCover(mangaHome, meta)
+        }
     }
 
     private fun onHiddenChapterLoaded(content: String) {
@@ -435,5 +448,7 @@ class DlActivity : ToolsBoxActivity() {
     companion object {
         var comicName = "Null"
         var json: String? = null
+        /** 详情页抓到的元信息（JSON，由 MainActivity 按 pathWord 取出） */
+        var comicMetaJson: String = ""
     }
 }

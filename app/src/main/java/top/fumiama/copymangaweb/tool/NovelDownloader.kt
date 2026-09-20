@@ -3,6 +3,7 @@ package top.fumiama.copymangaweb.tool
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.widget.Toast
 
 /**
@@ -31,6 +32,15 @@ object NovelDownloader {
                     meta.volumes = NovelApi.volumes(apiBase, meta.pathWord).toMutableList()
                 }
                 total = meta.volumes.size
+                // 封面与卷正文一起下（已存在就跳过）
+                if (meta.cover.isNotBlank()) {
+                    val cover = NovelStore.coverFile(ctx, meta.name)
+                    if (!cover.exists() || cover.length() == 0L) {
+                        if (NovelApi.downloadBinary(meta.cover, cover)) {
+                            Log.d("NovelDL", "cover saved -> ${cover.path}")
+                        }
+                    }
+                }
                 if (total == 0) {
                     toast(ctx, "无法获取卷列表，请稍后重试")
                     return@Thread

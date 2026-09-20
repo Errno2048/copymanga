@@ -16,6 +16,7 @@ import android.webkit.WebView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.lifecycle.lifecycleScope
+import top.fumiama.copymangaweb.tool.ComicMetaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -217,6 +218,13 @@ class MainActivity: ToolsBoxActivity() {
     fun setFab(content: String, sourceUrl: String, comicTitle: String) {
         if (content.isBlank() || content == "[]" || !isRequestedDetailsPage(sourceUrl)) return
         DlActivity.comicName = comicTitle
+        // 详情页抓到的封面/作者（i.js 先经 rememberComicMeta 存好），按 pathWord 取出来给下载页
+        runCatching {
+            val pathWord = Uri.parse(sourceUrl).pathSegments.lastOrNull { it.isNotBlank() }
+            DlActivity.comicMetaJson = pathWord?.let { ComicMetaStore.get(this, it) }
+                ?.let { top.fumiama.copymangaweb.tool.NovelStore.gson().toJson(it) }
+                ?: ""
+        }
         // 记下 pathWord -> 漫画名：之后「續看」解析本地进度用它，不必再请求漫画接口
         runCatching {
             android.net.Uri.parse(sourceUrl).pathSegments

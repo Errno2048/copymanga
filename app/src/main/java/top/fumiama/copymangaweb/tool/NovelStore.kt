@@ -43,6 +43,9 @@ class NovelBookMeta {
     var pathWord: String = ""
     var name: String = ""
     var apiBase: String = ""
+    /** 封面原图地址（页面侧传入；用于「我的下载」的封面展示） */
+    var cover: String = ""
+    var author: String = ""
     var volumes: MutableList<NovelVolumeInfo> = mutableListOf()
     var details: MutableMap<String, NovelVolumeMeta> = mutableMapOf()
 
@@ -55,6 +58,8 @@ class NovelOpenRequest {
     var pathWord: String = ""
     var name: String = ""
     var apiBase: String = ""
+    var cover: String = ""
+    var author: String = ""
     var volumes: MutableList<NovelVolumeInfo> = mutableListOf()
     var volume: NovelVolumeMeta? = null
 }
@@ -81,6 +86,9 @@ object NovelStore {
         return File(dir(ctx, name), sanitize("${volumeName}__${chapter.name}") + "." + ext)
     }
 
+    /** 封面文件：<书名>/cover.jpg（下载时落盘，已存在则不重下） */
+    fun coverFile(ctx: Context, name: String): File = File(dir(ctx, name), "cover.jpg")
+
     fun sanitize(s: String): String =
         s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { "volume" }
 
@@ -104,6 +112,8 @@ object NovelStore {
         }
         if (req.pathWord.isNotBlank()) meta.pathWord = req.pathWord
         if (req.apiBase.isNotBlank()) meta.apiBase = req.apiBase
+        if (req.cover.isNotBlank()) meta.cover = req.cover
+        if (req.author.isNotBlank()) meta.author = req.author
         if (req.volumes.isNotEmpty()) meta.volumes = req.volumes
         req.volume?.let { meta.details[it.id] = it }
         save(ctx, meta)

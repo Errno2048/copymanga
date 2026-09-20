@@ -314,6 +314,8 @@ if (typeof (loaded) == "undefined") {
                     self.loadNovelBook();
                     self.installNovelDownloadButton();
                 }
+                self.collectComicMeta();
+                self.installNoticeFilter();
                 self.installContinueButton();
                 self.watchLogin();
                 self.installShelfHook();
@@ -591,6 +593,9 @@ if (typeof (loaded) == "undefined") {
                                 pathWord: pw,
                                 name: (book && book.name) || document.title,
                                 apiBase: api,
+                                // 封面/作者：供「我的下载」按书架样式展示（下载时落盘）
+                                cover: self.coverFromDom(pw) || self.coverUrlOf(book && book.cover),
+                                author: self.authorTextOf(book && book.author),
                                 volumes: list.map(function (v) { return { id: String(v.id), name: v.name }; })
                             };
                             if (cb) cb(self.novelBook);
@@ -609,6 +614,8 @@ if (typeof (loaded) == "undefined") {
                         pathWord: book.pathWord,
                         name: book.name,
                         apiBase: book.apiBase,
+                        cover: book.cover || "",
+                        author: book.author || "",
                         volumes: book.volumes,
                         volume: {
                             id: String(v.id),
@@ -645,7 +652,11 @@ if (typeof (loaded) == "undefined") {
             if (!book) { self.loadNovelBook(function () { self.downloadNovel(); }); return; }
             var st = document.getElementById("cm-novel-dl-state");
             if (st) st.textContent = "已提交";
-            var req = { pathWord: book.pathWord, name: book.name, apiBase: book.apiBase, volumes: book.volumes, volume: null };
+            var req = {
+                pathWord: book.pathWord, name: book.name, apiBase: book.apiBase,
+                cover: book.cover || "", author: book.author || "",
+                volumes: book.volumes, volume: null
+            };
             try { GM.downloadNovel(JSON.stringify(req)); } catch (e) {}
         },
         // ---------------- 页面栈协作（滚动位置 + 原地返回 + 失效刷新） ----------------
@@ -1079,6 +1090,125 @@ if (typeof (loaded) == "undefined") {
                 setTimeout(function () { self.dismissPopup(remaining - 1); }, settings.popupRetryMs);
             }
         },
+        // ---------- 漫画元信息（封面 / 作者）：下载任意章节时一起存到本地 ----------
+        comicMetaSent: {},
+        /** 封面字段可能是相对路径，缩略图还带 .328x422.jpg 后缀：能拿到页面上的真实 src 最好 */
+        coverFromDom: function (pw) {
+            var imgs = document.getElementsByTagName("img");
+            for (var i = 0; i < imgs.length; i++) {
+                var s = imgs[i].currentSrc || imgs[i].src || "";
+                if (s && pw && s.indexOf(pw) >= 0 && /cover/i.test(s)) {
+                    return s.replace(/\.\d+x\d+\.(jpg|jpeg|png|webp)$/i, "");
+                }
+            }
+            return "";
+        },
+        coverUrlOf: function (cover) {
+            if (!cover) return "";
+            var c = String(cover);
+            if (/^https?:/i.test(c)) return c.replace(/\.\d+x\d+\.(jpg|jpeg|png|webp)$/i, "");
+            var host = "";
+            var imgs = document.getElementsByTagName("img");
+            for (var i = 0; i < imgs.length; i++) {
+                var s = imgs[i].currentSrc || imgs[i].src || "";
+                var m = s.match(/^(https?:\/\/[^\/]+)\//);
+                if (m && /mangafun/i.test(m[1])) { host = m[1]; break; }
+            }
+            if (!host) host = "https://s3.mangafunb.fun";
+            c = c.replace(/\.\d+x\d+\.(jpg|jpeg|png|webp)$/i, "").replace(/^\/+/, "");
+            return host + "/book/" + c;
+        },
+        authorTextOf: function (a) {
+            if (!a) return "";
+            if (typeof a === "string") return a;
+            if (a.length) {
+                return a.map(function (x) { return (x && (x.name || x)) || ""; })
+                    .filter(function (s) { return !!s; }).join(" / ");
+            }
+            return "";
+        },
+        /** 在 store / 组件数据里按 path_word 找漫画条目（列表缓存里就有封面与作者） */
+        findComicInfo: function (pw) {
+            var found = null;
+            var budget = { n: 0 };
+            var seen = [];
+            var walk = function (o, depth) {
+                if (!o || typeof o !== "object" || depth > 5 || budget.n > 4000 || found) return;
+                budget.n++;
+                for (var i = 0; i < seen.length; i++) if (seen[i] === o) return;
+                seen.push(o);
+                if ((o.path_word || o.pathWord) === pw && (o.cover || o.name)) { found = o; return; }
+                for (var k in o) {
+                    if (found) return;
+                    if (k === "$el" || k === "$parent" || k === "$root" || k === "$children") continue;
+                    var v;
+                    try { v = o[k]; } catch (e) { continue; }
+                    if (v && typeof v === "object") walk(v, depth + 1);
+                }
+            };
+            var store = this.storeOf();
+            if (store) walk(store.state, 0);
+            if (!found) {
+                var root = this.vueRoot();
+                if (root) walk(root, 0);
+            }
+            return found;
+        },
+        /**
+         * 漫画详情页：把封面 / 作者 / 分类交给原生（下载章节时随 info.bin 一起落盘）。
+         * 每个 pathWord 只报一次；拿不到封面就不报，避免存下空元信息。
+         */
+        collectComicMeta: function () {
+            var m = location.pathname.match(/\/details\/comic\/([^\/]+)\/([A-Za-z0-9_-]+)/);
+            if (!m) return;
+            var pw = m[2];
+            if (this.comicMetaSent[pw]) return;
+            var info = this.findComicInfo(pw) || {};
+            var name = info.name || "";
+            if (!name) {
+                var h = document.getElementsByTagName("h6")[0];
+                name = (h && (h.title || h.innerText)) || (document.title || "").split(/[-|]/)[0].trim();
+            }
+            var cover = this.coverFromDom(pw) || this.coverUrlOf(info.cover);
+            var author = this.authorTextOf(info.author);
+            if (!cover && !name) return;
+            this.comicMetaSent[pw] = 1;
+            try {
+                GM.rememberComicMeta(JSON.stringify({
+                    pathWord: pw, type: m[1], name: name, cover: cover, author: author
+                }));
+            } catch (e) {}
+        },
+        /**
+         * 站点的两类打扰：
+         * 1) 进入时的系统公告弹窗（#systemConfirm）：隐藏遮罩与弹窗，并代点「我知道了」——
+         *    只隐藏不点，遮罩会留着挡住页面操作；
+         * 2) 网络异常时的 toast（超时/连接失败/请求失败…）：只在文案命中网络类关键词时隐藏，
+         *    避免误伤「收藏成功」这类正常提示。页面加载不出来本身已经说明网络有问题，
+         *    不需要再弹一次提示。
+         */
+        noticeToastRe: /超时|超時|逾時|timeout|连接失败|連接失敗|連線失敗|网络异常|網路異常|网络错误|網路錯誤|网络连接|網路連接|无法连接|無法連接|请求失败|請求失敗|请求异常|請求異常|加载失败|載入失敗|重新连接|重新連接|重新加载|重新載入|服务器错误|服務器錯誤|请检查网络|請檢查網絡|网络不佳|網路不佳/i,
+        installNoticeFilter: function () {
+            var self = this;
+            var dlg = document.getElementById("systemConfirm");
+            if (dlg) {
+                var ov = document.querySelector(".van-overlay");
+                if (ov) ov.style.display = "none";
+                dlg.style.display = "none";
+                var btn = dlg.querySelector("button, a");
+                if (btn && !btn.__cmNoticeClicked) {
+                    btn.__cmNoticeClicked = true;
+                    try { btn.click(); } catch (e) {}
+                }
+            }
+            var toasts = document.querySelectorAll(".van-toast");
+            for (var i = 0; i < toasts.length; i++) {
+                var t = toasts[i];
+                if (t.style.display === "none") continue;
+                var txt = (t.innerText || t.textContent || "").trim();
+                if (txt && self.noticeToastRe.test(txt)) t.style.display = "none";
+            }
+        },
         // 兜底：若路由守卫未生效（例如老版本无 loadComicDirect），仍在内容页拉起阅读器。
         loadChapter: function () {
             var self = this;
@@ -1123,6 +1253,15 @@ if (typeof (loaded) == "undefined") {
     invoke.urlChangeListener(modify);
     setTimeout(function () { invoke.installRouterGuard(); invoke.allowNovel(); }, 800);
     invoke.applyNight();
+    // 公告弹窗要尽早挡住：启动后 7 秒内密集检查，之后交给定时兜底
+    (function () {
+        var n = 0;
+        var t = setInterval(function () {
+            try { window.invoke.installNoticeFilter(); } catch (e) {}
+            if (++n > 58) clearInterval(t);
+        }, 120);
+    })();
+    try { invoke.installNoticeFilter(); } catch (e) {}
     invoke.startTick();
     setTimeout(function () { invoke.allowNovel(); }, 2500);
 } else {

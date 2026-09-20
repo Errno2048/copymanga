@@ -154,6 +154,15 @@ class ViewNovelActivity : Activity() {
     /** 每页行数与行距（都按章统一）。 */
     private class PageGrid(val perPage: Int, val spacing: Float)
 
+    /**
+     * 页面底部给「最后一行的字脚」留的余量（px）。
+     * 行盒底 = 字体 descent，但部分字形的墨迹会再低几个像素，
+     * 只按行盒裁会把它们切掉；留一点余量既不影响分页，也不会露出下一行
+     * （下一行行盒顶在行距之后，余量远小于行距）。
+     */
+    private fun glyphSlackOf(paint: TextPaint): Float =
+        (paint.textSize * 0.12f).coerceAtLeast(1.5f).coerceAtMost(dpf(LINE_SPACING_DP) * 0.6f)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 边到边：系统栏显示与否都不改变内容区尺寸，只是悬浮覆盖在正文上，
@@ -793,6 +802,9 @@ class ViewNovelActivity : Activity() {
             // 行距不参与折行：先按基础行距量出每行行盒高，定出「每页整几行」，再把
             // 剩余空间平摊进行间隙，让整页正好铺满正文框（详见 planPageGrid）。
             val grid = planPageGrid(text, paint, w, h)
+            // 末行墨迹可能比行盒底再低几个像素（descent 之外的字脚），
+            // 排版时预留这么多，绘制时也把裁剪底线放宽同样多
+            val glyphSlack = glyphSlackOf(paint)
             linesPerPage = grid.perPage
             lineSpacingPx = grid.spacing
             val layout = buildBodyLayout(text, paint, w, grid.spacing)
@@ -805,7 +817,8 @@ class ViewNovelActivity : Activity() {
                 built.add(Page().also {
                     it.layout = layout
                     it.topY = top
-                    it.clipH = (layout.getLineBottom(last) - top).coerceAtLeast(1)
+                    it.clipH = (layout.getLineBottom(last) - top + glyphSlack).toInt()
+                        .coerceAtLeast(1).coerceAtMost(h)
                 })
                 offsets.add(layout.getLineStart(line))
                 tops.add(top)
@@ -905,12 +918,16 @@ class ViewNovelActivity : Activity() {
             worst = maxSum
         }
         // 整章不足两页时（只剩末页）不撑行距：那一页本来就不满
-        val spacing = if (per in 2 until n) maxOf(base, (h - worst) / (per - 1)) else base
+        val slack = glyphSlackOf(paint)
+        val spacing = if (per in 2 until n) {
+            maxOf(base, ((h - slack) - worst) / (per - 1))
+        } else {
+            base
+        }
         Log.d(
             "NovelReader",
-            "grid lines=$n per=$per spacing=%.2f base=%.2f worst=%.1f box=${w}x$h".format(
-                spacing, base, worst
-            )
+            "grid lines=$n per=$per spacing=%.2f base=%.2f worst=%.1f slack=%.1f box=${w}x$h"
+                .format(spacing, base, worst, slack)
         )
         return PageGrid(per, spacing)
     }
