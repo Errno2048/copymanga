@@ -1300,6 +1300,16 @@ if (typeof (loaded) == "undefined") {
                 if (document.documentElement) {
                     document.documentElement.classList.remove("van-overflow-hidden");
                 }
+                // Vant 的滚动锁还会在内联样式上写 overflow:hidden，一并清掉
+                if (b.style && (b.style.overflow === "hidden" || b.style.overflowY === "hidden")) {
+                    b.style.overflow = "";
+                    b.style.overflowY = "";
+                }
+                var he = document.documentElement;
+                if (he && he.style && (he.style.overflow === "hidden" || he.style.overflowY === "hidden")) {
+                    he.style.overflow = "";
+                    he.style.overflowY = "";
+                }
             }
         },
         installNoticeFilter: function () {
@@ -1318,13 +1328,18 @@ if (typeof (loaded) == "undefined") {
             var anyNotice = false;
             var sys = document.getElementById("systemConfirm");
             if (sys) self.noticeSeen = true;      // 只要还挂在 DOM 上就持续压制遮罩
-            if (sys && self.isShown(sys)) {
-                anyNotice = true;
-                hideOverlays();
-                self.hideNotice(sys);
+            if (sys) {
+                if (self.isShown(sys)) {
+                    anyNotice = true;
+                    hideOverlays();
+                    self.hideNotice(sys);
+                }
                 var sb = sys.querySelector("button, a");
-                if (sb && !sb.__cmNoticeClicked) {
-                    sb.__cmNoticeClicked = true;
+                var nowSys = Date.now();
+                var sysTries = sb ? (sb.__cmNoticeClicks || 0) : 99;
+                if (sb && sysTries < 20 && nowSys - (sb.__cmNoticeClickedAt || 0) > 400) {
+                    sb.__cmNoticeClicks = sysTries + 1;
+                    sb.__cmNoticeClickedAt = nowSys;
                     try { sb.click(); } catch (e) {}
                 }
             }
@@ -1337,14 +1352,23 @@ if (typeof (loaded) == "undefined") {
                 // 站点把超时弹窗反复显示/隐藏时，只要它还在 DOM 里就让遮罩一直压制，
                 // 否则每次它“回来”都会闪一下并把页面挡住
                 self.noticeSeen = true;
-                if (!self.isShown(d)) continue;
-                anyNotice = true;
-                hideOverlays();
-                self.hideNotice(d);
+                if (self.isShown(d)) {
+                    anyNotice = true;
+                    hideOverlays();
+                    self.hideNotice(d);
+                }
+                // 必须把站点这个弹窗真正关掉（而不是只藏起来）：Vant 弹窗在“打开”状态会给
+                // document 挂一个非被动的 touchmove 监听做滚动锁（preventDefault），
+                // 只隐藏不关，页面就一直滑不动。这里每 400ms 以内只点一次，最多点 20 次。
                 var b = d.querySelector("button, a");
-                if (b && !b.__cmNoticeClicked) {
-                    b.__cmNoticeClicked = true;
-                    try { b.click(); } catch (e) {}
+                if (b) {
+                    var now = Date.now();
+                    var tries = b.__cmNoticeClicks || 0;
+                    if (tries < 20 && now - (b.__cmNoticeClickedAt || 0) > 400) {
+                        b.__cmNoticeClicks = tries + 1;
+                        b.__cmNoticeClickedAt = now;
+                        try { b.click(); } catch (e) {}
+                    }
                 }
             }
             // 3) 网络类轻提示
