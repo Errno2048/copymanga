@@ -1259,6 +1259,8 @@ if (typeof (loaded) == "undefined") {
          * 之后路由切换时遮罩会被重新显示出来（表现为返回后一层点不动的深色遮罩）。
          */
         noticeHiddenClass: "cm-notice-hidden",
+        /** 本页出现过站点的网络/公告弹窗：在其留在 DOM 期间持续压制遮罩 */
+        noticeSeen: false,
         noticeMaskClass: "cm-notice-mask-off",
         installNoticeStyle: function () {
             if (document.getElementById("cm-notice-style")) return;
@@ -1271,8 +1273,16 @@ if (typeof (loaded) == "undefined") {
                 "{opacity:0 !important;pointer-events:none !important;}";
             (document.head || document.documentElement).appendChild(s);
         },
+        /**
+         * 元素是否真的显示在页面上。注意不能只看元素自身的 computed style：
+         * 祖先 display:none 时，元素自身的 display 仍是 block —— 之前正是因为这个，
+         * 站点留在 DOM 里的隐藏弹层被当成“可见弹层”，导致遮罩压制一直被关掉，
+         * 残留遮罩长期可见（并随弹窗增删反复闪烁）。
+         * getClientRects() 为空即表示没有渲染出来；带 cm-notice-hidden 的也一律算隐藏。
+         */
         isShown: function (el) {
-            if (!el) return false;
+            if (!el || !el.getClientRects || el.getClientRects().length === 0) return false;
+            if (el.closest && el.closest("." + this.noticeHiddenClass)) return false;
             var cs = getComputedStyle(el);
             return cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0";
         },
@@ -1297,10 +1307,17 @@ if (typeof (loaded) == "undefined") {
             self.installNoticeStyle();
             var hideOverlays = function () {
                 self.setMaskOff(true);
+                // 除了给 body 加类，也直接给当前可见的遮罩打标记：双保险，
+                // 即使类被后续逻辑摘掉，这些遮罩也不会再冒出来
+                var ov = document.querySelectorAll(".van-overlay, .van-popup__overlay");
+                for (var k = 0; k < ov.length; k++) {
+                    if (self.isShown(ov[k])) self.hideNotice(ov[k]);
+                }
             };
             // 1) 进入时的系统公告弹窗（有固定 id）
             var anyNotice = false;
             var sys = document.getElementById("systemConfirm");
+            if (sys) self.noticeSeen = true;      // 只要还挂在 DOM 上就持续压制遮罩
             if (sys && self.isShown(sys)) {
                 anyNotice = true;
                 hideOverlays();
@@ -1315,9 +1332,12 @@ if (typeof (loaded) == "undefined") {
             var dlg = document.querySelectorAll(".van-dialog");
             for (var i = 0; i < dlg.length; i++) {
                 var d = dlg[i];
-                if (!self.isShown(d)) continue;
                 var t = (d.innerText || d.textContent || "").trim();
                 if (!t || !self.noticeDialogRe.test(t)) continue;
+                // 站点把超时弹窗反复显示/隐藏时，只要它还在 DOM 里就让遮罩一直压制，
+                // 否则每次它“回来”都会闪一下并把页面挡住
+                self.noticeSeen = true;
+                if (!self.isShown(d)) continue;
                 anyNotice = true;
                 hideOverlays();
                 self.hideNotice(d);
@@ -1343,6 +1363,8 @@ if (typeof (loaded) == "undefined") {
             // 表现为返回后整页被一层深色遮罩挡住、点什么都没反应。
             if (self.anyPopupShown()) { self.setMaskOff(false); return; }
             if (anyNotice) return;                  // 本轮的遮罩由上面的分支处理
+            // 站点还挂着超时弹窗（哪怕已被我们藏起来）：遮罩保持压制，避免反复闪
+            if (self.noticeSeen) { self.setMaskOff(true); return; }
             var ovs = document.querySelectorAll(".van-overlay, .van-popup__overlay");
             var orphan = false;
             for (var k = 0; k < ovs.length; k++) {
